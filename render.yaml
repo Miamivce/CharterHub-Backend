@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: charterhub-api
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DB_HOST
+        value: mysql-charterhub-charterhub.c.aivencloud.com
+      - key: DB_PORT
+        value: 19174
+      - key: DB_USER
+        value: avnadmin
+      - key: DB_PASS
+        value: AVNS_HCZbm5bZJE1L9C8Pz8C
+      - key: DB_NAME
+        value: defaultdb
+      - key: DB_SSL
+        value: REQUIRED
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        value: https://app.yachtstory.com 

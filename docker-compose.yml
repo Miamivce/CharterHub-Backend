@@ -1,0 +1,21 @@
+version: '3'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/var/www
+    environment:
+      - DB_HOST=mysql-charterhub-charterhub.c.aivencloud.com
+      - DB_PORT=19174
+      - DB_USER=avnadmin
+      - DB_PASS=AVNS_HCZbm5bZJE1L9C8Pz8C
+      - DB_NAME=defaultdb
+      - DB_SSL=REQUIRED
+      - JWT_SECRET=local_jwt_secret_for_testing
+      - JWT_REFRESH_SECRET=local_jwt_refresh_secret_for_testing
+      - FRONTEND_URL=http://localhost:3000 

@@ -1,0 +1,507 @@
+<?php
+/**
+ * CharterHub Authentication Configuration
+ * 
+ * This file contains configuration settings for the authentication system.
+ */
+
+// Development mode flag - IMPORTANT: Set to false when going live!
+define('DEVELOPMENT_MODE', true);
+
+// Database configuration
+$db_config = [
+    'host' => 'localhost',
+    'database' => 'charterhub_local',
+    'username' => 'root',
+    'password' => '', // Update this if your MySQL root user has a password
+    'charset' => 'utf8mb4',
+    'table_prefix' => 'wp_'
+];
+
+// Authentication settings
+$auth_config = [
+    'jwt_secret' => 'your-jwt-secret-key', // Change this in production
+    'jwt_expiration' => 3600, // 1 hour
+    'refresh_expiration' => 2592000, // 30 days
+    'password_min_length' => 8,
+    'invitation_expiration' => 7, // days
+    'verification_expiration' => 48, // hours
+    'max_login_attempts' => 5,
+    'lockout_time' => 30, // minutes
+];
+
+// Dynamically detect frontend port from the Origin header if available
+$frontend_port = 3004; // Default port as fallback
+$frontend_base = 'http://localhost';
+
+if (isset($_SERVER['HTTP_ORIGIN'])) {
+    // Extract port from Origin header (e.g., http://localhost:3007)
+    $origin_parts = parse_url($_SERVER['HTTP_ORIGIN']);
+    if (isset($origin_parts['port'])) {
+        $frontend_port = $origin_parts['port'];
+    }
+}
+
+// Frontend URLs with dynamic port
+$frontend_urls = [
+    'base_url' => "{$frontend_base}:{$frontend_port}",
+    'login_url' => "{$frontend_base}:{$frontend_port}/login",
+    'verification_url' => "{$frontend_base}:{$frontend_port}/verify-email",
+    'password_reset_url' => "{$frontend_base}:{$frontend_port}/reset-password",
+];
+
+// Email configuration
+$email_config = [
+    'from_email' => 'noreply@charterhub.com',
+    'from_name' => 'CharterHub',
+    'smtp_host' => '', // Configure in production
+    'smtp_port' => 587,
+    'smtp_username' => '',
+    'smtp_password' => '',
+    'smtp_secure' => 'tls',
+];
+
+/**
+ * Verify a JWT token
+ * 
+ * @param string $jwt The JWT token to verify
+ * @return object The decoded token payload if valid
+ * @throws Exception If token is invalid or expired
+ */
+function verify_jwt_token($jwt) {
+    global $auth_config;
+    
+    try {
+        // Split the JWT
+        $tokenParts = explode('.', $jwt);
+        if (count($tokenParts) != 3) {
+            throw new Exception('Invalid token format');
+        }
+        
+        list($header, $payload, $signature) = $tokenParts;
+        
+        // Decode header and payload
+        $decodedHeader = json_decode(base64_decode($header), true);
+        $decodedPayload = json_decode(base64_decode($payload), true);
+        
+        // Check if token is expired
+        if (!isset($decodedPayload['exp']) || $decodedPayload['exp'] < time()) {
+            throw new Exception('Token has expired');
+        }
+        
+        // Verify signature (simple implementation for demonstration)
+        $base64UrlHeader = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
+        $base64UrlPayload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
+        $expectedSignature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, $auth_config['jwt_secret']);
+        $base64UrlSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+        
+        if ($base64UrlSignature !== $signature) {
+            throw new Exception('Invalid token signature');
+        }
+        
+        return (object) $decodedPayload;
+    } catch (Exception $e) {
+        throw new Exception('Token verification failed: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Get database connection with improved timeout settings
+ */
+function get_db_connection() {
+    global $db_config;
+    
+    try {
+        // Create PDO connection with extended timeout
+        $dsn = "mysql:host={$db_config['host']};dbname={$db_config['database']};charset=utf8mb4";
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+            PDO::ATTR_TIMEOUT => 30, // Connection timeout in seconds
+        ];
+        
+        $pdo = new PDO($dsn, $db_config['username'], $db_config['password'], $options);
+        
+        // Set session variables to increase timeouts
+        $pdo->exec("SET SESSION wait_timeout=300"); // 5 minutes
+        $pdo->exec("SET SESSION innodb_lock_wait_timeout=50"); // 50 seconds
+        
+        return $pdo;
+    } catch (PDOException $e) {
+        error_log("Database connection error: " . $e->getMessage());
+        throw new Exception("Database connection failed. Please try again later.");
+    }
+}
+
+/**
+ * Log authentication actions with retry logic
+ */
+function log_auth_action($user_id, $action, $status, $details = []) {
+    global $db_config;
+    
+    // Add IP and user agent to details if not already present
+    if (!isset($details['ip_address'])) {
+        $details['ip_address'] = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    }
+    
+    if (!isset($details['user_agent']) && isset($_SERVER['HTTP_USER_AGENT'])) {
+        $details['user_agent'] = $_SERVER['HTTP_USER_AGENT'];
+    }
+    
+    // Maximum number of retry attempts
+    $max_retries = 3;
+    $retry_count = 0;
+    $retry_delay = 1; // Initial delay in seconds
+    
+    while ($retry_count < $max_retries) {
+        try {
+            $pdo = get_db_connection();
+            
+            // Start transaction
+            $pdo->beginTransaction();
+            
+            $stmt = $pdo->prepare("
+                INSERT INTO {$db_config['table_prefix']}charterhub_auth_logs 
+                (user_id, action, status, ip_address, user_agent, details) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            
+            $stmt->execute([
+                $user_id,
+                $action,
+                $status,
+                $details['ip_address'],
+                $details['user_agent'] ?? null,
+                json_encode($details)
+            ]);
+            
+            // Commit transaction
+            $pdo->commit();
+            
+            // Log successful on retry
+            if ($retry_count > 0) {
+                error_log("Auth action logged successfully after {$retry_count} retries");
+            }
+            
+            return true;
+        } catch (Exception $e) {
+            // Roll back transaction if it's active
+            if (isset($pdo) && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            
+            $retry_count++;
+            $error_message = $e->getMessage();
+            
+            // If this is our last attempt, log the error and give up
+            if ($retry_count >= $max_retries) {
+                error_log("Error logging auth action: " . $error_message);
+                // Don't throw an exception for logging failures
+                return false;
+            }
+            
+            // If the error indicates a lock timeout, retry after a delay
+            if (strpos($error_message, 'Lock wait timeout exceeded') !== false) {
+                error_log("Lock timeout when logging auth action, retrying ({$retry_count}/{$max_retries})...");
+                sleep($retry_delay);
+                $retry_delay *= 2; // Exponential backoff
+            } else {
+                // For other database errors, also retry
+                error_log("Database error when logging auth action, retrying ({$retry_count}/{$max_retries}): {$error_message}");
+                sleep($retry_delay);
+                $retry_delay *= 2;
+            }
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * Generate JWT token
+ * 
+ * @param array $user_data User data for the token
+ * @param int|null $expiration_time Custom expiration time in seconds (optional)
+ * @return string JWT token
+ */
+function generate_jwt_token($user_data, $expiration_time = null) {
+    global $auth_config;
+    
+    // Use custom expiration time if provided, otherwise default
+    $expiration = $expiration_time ?? $auth_config['jwt_expiration'];
+    
+    $payload = [
+        'sub' => $user_data['ID'],
+        'email' => $user_data['user_email'],
+        'role' => $user_data['role'],
+        'iat' => time(),
+        'exp' => time() + $expiration
+    ];
+    
+    // In a real implementation, use a proper JWT library
+    // For now, we'll use a placeholder implementation
+    return base64_encode(json_encode($payload)) . '.' . 
+           base64_encode(hash_hmac('sha256', base64_encode(json_encode($payload)), $auth_config['jwt_secret'], true));
+}
+
+/**
+ * Send email
+ * 
+ * @param string $to Recipient email
+ * @param string $subject Email subject
+ * @param string $body Email body
+ * @return bool Success status
+ */
+function send_email($to, $subject, $body) {
+    global $email_config;
+    
+    // DEVELOPMENT MODE: Skip actual email sending and just log
+    if (defined('DEVELOPMENT_MODE') && DEVELOPMENT_MODE === true) {
+        error_log("============ DEVELOPMENT MODE: EMAIL NOT SENT ============");
+        error_log("Email to: {$to}");
+        error_log("Subject: {$subject}");
+        error_log("Body: " . substr($body, 0, 100) . "..."); // Only log first 100 chars to avoid large logs
+        error_log("============ END EMAIL CONTENT ============");
+        
+        // Return success immediately without trying to send
+        return true;
+    }
+    
+    // The code below will only run in production mode
+    // TODO: Implement proper email sending functionality before going live
+    // For now, just return true in development mode
+    return true;
+}
+
+/**
+ * Validate password strength
+ * 
+ * @param string $password Password to validate
+ * @return bool|string True if valid, error message if invalid
+ */
+function validate_password($password) {
+    global $auth_config;
+    
+    if (strlen($password) < $auth_config['password_min_length']) {
+        return "Password must be at least {$auth_config['password_min_length']} characters";
+    }
+    
+    if (!preg_match('/[a-z]/', $password)) {
+        return "Password must contain at least one lowercase letter";
+    }
+    
+    if (!preg_match('/[A-Z]/', $password)) {
+        return "Password must contain at least one uppercase letter";
+    }
+    
+    if (!preg_match('/\d/', $password)) {
+        return "Password must contain at least one number";
+    }
+    
+    return true;
+}
+
+/**
+ * Generate a secure random token
+ * 
+ * @param int $length Token length (default: 32)
+ * @return string Random token
+ */
+function generate_token($length = 32) {
+    return bin2hex(random_bytes($length / 2));
+}
+
+/**
+ * Set consistent CORS headers for all API endpoints
+ * 
+ * @param array $methods HTTP methods to allow, defaults to POST and OPTIONS
+ * @return void
+ */
+function set_cors_headers($methods = ['POST', 'OPTIONS']) {
+    // Convert methods array to comma-separated list
+    $allowed_methods = implode(', ', $methods);
+    
+    // Always include GET in allowed methods for better compatibility
+    if (!in_array('GET', $methods)) {
+        $allowed_methods .= ', GET';
+    }
+    
+    header('Content-Type: application/json');
+    
+    // Get the origin header
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+    
+    // Use a specific origin instead of wildcard to allow credentials
+    // For development, accept localhost origins
+    if (strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false) {
+        header("Access-Control-Allow-Origin: $origin");
+        header('Access-Control-Allow-Credentials: true');
+    } else {
+        // In production, set to your actual frontend domain
+        if (!empty($origin)) {
+            header("Access-Control-Allow-Origin: $origin");
+            header('Access-Control-Allow-Credentials: true');
+        } else {
+            // Fallback to * if no origin is provided (cannot use with credentials)
+            header('Access-Control-Allow-Origin: *');
+        }
+    }
+    
+    header('Access-Control-Allow-Methods: ' . $allowed_methods);
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Origin, Accept, Cache-Control, pragma, Pragma, Expires, X-CSRF-Token');
+    header('Access-Control-Max-Age: 86400'); // Cache preflight request for 24 hours
+    
+    // Enhanced cookie settings for secure sessions
+    if (!headers_sent() && session_status() === PHP_SESSION_NONE) {
+        $secure = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on';
+        $samesite = 'Lax'; // Use Lax to allow cookies to be sent with some cross-origin requests
+        
+        // PHP 7.3+ supports SameSite attribute directly
+        if (PHP_VERSION_ID >= 70300) {
+            session_set_cookie_params([
+                'lifetime' => 0,
+                'path' => '/',
+                'domain' => '',
+                'secure' => $secure,
+                'httponly' => true,
+                'samesite' => $samesite
+            ]);
+        } else {
+            // Fallback for older PHP versions
+            session_set_cookie_params(
+                0, 
+                '/; SameSite=' . $samesite, 
+                '', 
+                $secure, 
+                true
+            );
+        }
+    }
+    
+    // Handle preflight requests automatically
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        http_response_code(200);
+        exit;
+    }
+}
+
+/**
+ * Generate a CSRF token and store it in the session
+ *
+ * @return string The generated CSRF token
+ */
+function generate_csrf_token() {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    
+    // Generate a new token if one doesn't exist
+    if (!isset($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        $_SESSION['csrf_token_time'] = time();
+    } else {
+        // Regenerate token if it's more than 1 hour old
+        if (time() - $_SESSION['csrf_token_time'] > 3600) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            $_SESSION['csrf_token_time'] = time();
+        }
+    }
+    
+    return $_SESSION['csrf_token'];
+}
+
+/**
+ * Verify the CSRF token from the request
+ *
+ * @param string $token The token to verify against the stored token
+ * @return bool True if token is valid, false otherwise
+ */
+function verify_csrf_token($token) {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    
+    // Check if token exists and matches
+    if (isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token)) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Get rate limit status for an IP address
+ *
+ * @param string $ip_address The IP address to check
+ * @param string $action The action to check (e.g., 'login')
+ * @return array Rate limit information
+ */
+function get_rate_limit_status($ip_address, $action = 'login') {
+    global $auth_config, $db_config;
+    
+    try {
+        $pdo = get_db_connection();
+        $lockout_time = date('Y-m-d H:i:s', strtotime("-{$auth_config['lockout_time']} minutes"));
+        
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) as attempt_count
+            FROM {$db_config['table_prefix']}charterhub_auth_logs 
+            WHERE ip_address = :ip_address 
+            AND action = :action 
+            AND status = 'failure' 
+            AND created_at > :lockout_time
+        ");
+        $stmt->execute([
+            'ip_address' => $ip_address, 
+            'action' => $action,
+            'lockout_time' => $lockout_time
+        ]);
+        $attempt_count = $stmt->fetch(PDO::FETCH_ASSOC)['attempt_count'];
+        
+        return [
+            'is_locked' => $attempt_count >= $auth_config['max_login_attempts'],
+            'attempts' => $attempt_count,
+            'max_attempts' => $auth_config['max_login_attempts'],
+            'lockout_minutes' => $auth_config['lockout_time'],
+            'remaining_attempts' => max(0, $auth_config['max_login_attempts'] - $attempt_count)
+        ];
+    } catch (Exception $e) {
+        error_log("Error checking rate limit: " . $e->getMessage());
+        // Default to no lockout on error
+        return [
+            'is_locked' => false,
+            'attempts' => 0,
+            'max_attempts' => $auth_config['max_login_attempts'],
+            'lockout_minutes' => $auth_config['lockout_time'],
+            'remaining_attempts' => $auth_config['max_login_attempts']
+        ];
+    }
+}
+
+/**
+ * Reset rate limiting for an IP address (for development/testing only)
+ *
+ * @param string $ip_address The IP address to reset
+ * @return bool Success status
+ */
+function reset_rate_limiting($ip_address) {
+    global $db_config;
+    
+    if (!defined('DEVELOPMENT_MODE') || DEVELOPMENT_MODE !== true) {
+        return false;
+    }
+    
+    try {
+        $pdo = get_db_connection();
+        $stmt = $pdo->prepare("
+            DELETE FROM {$db_config['table_prefix']}charterhub_auth_logs 
+            WHERE ip_address = :ip_address AND status = 'failure'
+        ");
+        $stmt->execute(['ip_address' => $ip_address]);
+        return true;
+    } catch (Exception $e) {
+        error_log("Error resetting rate limit: " . $e->getMessage());
+        return false;
+    }
+} 

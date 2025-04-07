@@ -1,0 +1,253 @@
+[25-Feb-2025 23:34:49 UTC] Admin login endpoint called at 2025-02-25 23:34:49
+[25-Feb-2025 23:34:49 UTC] Admin login endpoint called at 2025-02-25 23:34:49
+[25-Feb-2025 23:34:49 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:34:49 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:34:49 UTC] Server running on port: 8001
+[25-Feb-2025 23:34:49 UTC] Server request received from: ::1
+[25-Feb-2025 23:34:49 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:34:49 UTC] Admin login request received: {"username":"admin","password":"t@$*#ezC@M$BwrCGf0!axosa","remember_me":true}
+[25-Feb-2025 23:34:49 UTC] Calling WordPress endpoint: http://localhost:8888/wp-json/charterhub/v1/admin-login
+[25-Feb-2025 23:34:49 UTC] cURL info: {"url":"http:\/\/localhost:8888\/wp-json\/charterhub\/v1\/admin-login","content_type":"application\/json; charset=UTF-8","http_code":401,"header_size":654,"request_size":210,"filetime":-1,"ssl_verify_result":0,"redirect_count":0,"total_time":0.497129,"namelookup_time":5.3e-5,"connect_time":0.000208,"pretransfer_time":0.000266,"size_upload":58,"size_download":94,"speed_download":189,"speed_upload":116,"download_content_length":-1,"upload_content_length":58,"starttransfer_time":0.497083,"redirect_time":0,"redirect_url":"","primary_ip":"::1","certinfo":[],"primary_port":8888,"local_ip":"::1","local_port":57395,"http_version":2,"protocol":1,"ssl_verifyresult":0,"scheme":"http","appconnect_time_us":0,"connect_time_us":208,"namelookup_time_us":53,"pretransfer_time_us":266,"redirect_time_us":0,"starttransfer_time_us":497083,"posttransfer_time_us":265,"total_time_us":497129,"effective_method":"POST","capath":"","cainfo":""}
+[25-Feb-2025 23:34:49 UTC] WordPress response status: 401
+[25-Feb-2025 23:34:49 UTC] WordPress response: {"code":"invalid_authorization","message":"Valid Bearer token required","data":{"status":401}}
+[25-Feb-2025 23:38:07 UTC] Admin login endpoint called at 2025-02-25 23:38:07
+[25-Feb-2025 23:38:07 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:38:07 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:38:07 UTC] Server running on port: 8001
+[25-Feb-2025 23:38:07 UTC] Server request received from: ::1
+[25-Feb-2025 23:38:07 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:38:07 UTC] Admin login request received: 
+[25-Feb-2025 23:38:30 UTC] Admin login endpoint called at 2025-02-25 23:38:30
+[25-Feb-2025 23:38:30 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:38:30 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:38:30 UTC] Server running on port: 8001
+[25-Feb-2025 23:38:30 UTC] Server request received from: ::1
+[25-Feb-2025 23:38:30 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:38:30 UTC] Admin login request received: {"username":"test","password":"test"}
+[25-Feb-2025 23:38:30 UTC] Calling WordPress endpoint: http://localhost:8888/wp-json/charterhub/v1/admin-login
+[25-Feb-2025 23:38:31 UTC] cURL info: {"url":"http:\/\/localhost:8888\/wp-json\/charterhub\/v1\/admin-login","content_type":"application\/json; charset=UTF-8","http_code":401,"header_size":654,"request_size":189,"filetime":-1,"ssl_verify_result":0,"redirect_count":0,"total_time":0.209367,"namelookup_time":2.4e-5,"connect_time":0.000161,"pretransfer_time":0.000219,"size_upload":37,"size_download":94,"speed_download":448,"speed_upload":176,"download_content_length":-1,"upload_content_length":37,"starttransfer_time":0.209324,"redirect_time":0,"redirect_url":"","primary_ip":"::1","certinfo":[],"primary_port":8888,"local_ip":"::1","local_port":58532,"http_version":2,"protocol":1,"ssl_verifyresult":0,"scheme":"http","appconnect_time_us":0,"connect_time_us":161,"namelookup_time_us":24,"pretransfer_time_us":219,"redirect_time_us":0,"starttransfer_time_us":209324,"posttransfer_time_us":217,"total_time_us":209367,"effective_method":"POST","capath":"","cainfo":""}
+[25-Feb-2025 23:38:31 UTC] WordPress response status: 401
+[25-Feb-2025 23:38:31 UTC] WordPress response: {"code":"invalid_authorization","message":"Valid Bearer token required","data":{"status":401}}
+[25-Feb-2025 23:38:35 UTC] Admin login endpoint called at 2025-02-25 23:38:35
+[25-Feb-2025 23:38:35 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:38:35 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:38:35 UTC] Server running on port: 8001
+[25-Feb-2025 23:38:35 UTC] Server request received from: ::1
+[25-Feb-2025 23:38:35 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:38:35 UTC] Admin login request received: {"username":"admin","password":"t@$*#ezC@M$BwrCGf0!axosa","remember_me":true}
+[25-Feb-2025 23:38:35 UTC] Calling WordPress endpoint: http://localhost:8888/wp-json/charterhub/v1/admin-login
+[25-Feb-2025 23:38:36 UTC] cURL info: {"url":"http:\/\/localhost:8888\/wp-json\/charterhub\/v1\/admin-login","content_type":"application\/json; charset=UTF-8","http_code":401,"header_size":654,"request_size":210,"filetime":-1,"ssl_verify_result":0,"redirect_count":0,"total_time":0.598501,"namelookup_time":0.000346,"connect_time":0.000753,"pretransfer_time":0.000901,"size_upload":58,"size_download":94,"speed_download":157,"speed_upload":96,"download_content_length":-1,"upload_content_length":58,"starttransfer_time":0.598393,"redirect_time":0,"redirect_url":"","primary_ip":"::1","certinfo":[],"primary_port":8888,"local_ip":"::1","local_port":58555,"http_version":2,"protocol":1,"ssl_verifyresult":0,"scheme":"http","appconnect_time_us":0,"connect_time_us":753,"namelookup_time_us":346,"pretransfer_time_us":901,"redirect_time_us":0,"starttransfer_time_us":598393,"posttransfer_time_us":896,"total_time_us":598501,"effective_method":"POST","capath":"","cainfo":""}
+[25-Feb-2025 23:38:36 UTC] WordPress response status: 401
+[25-Feb-2025 23:38:36 UTC] WordPress response: {"code":"invalid_authorization","message":"Valid Bearer token required","data":{"status":401}}
+[25-Feb-2025 23:42:54 UTC] Admin login endpoint called at 2025-02-25 23:42:54
+[25-Feb-2025 23:42:54 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:42:54 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:42:54 UTC] Server running on port: 8001
+[25-Feb-2025 23:42:54 UTC] Server request received from: ::1
+[25-Feb-2025 23:42:54 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:42:54 UTC] Admin login request received: {"username":"admin","password":"password"}
+[25-Feb-2025 23:42:54 UTC] Calling WordPress endpoint: http://localhost:8888/wp-json/charterhub/v1/admin-login
+[25-Feb-2025 23:42:55 UTC] cURL info: {"url":"http:\/\/localhost:8888\/wp-json\/charterhub\/v1\/admin-login","content_type":"application\/json; charset=UTF-8","http_code":401,"header_size":766,"request_size":257,"filetime":-1,"ssl_verify_result":0,"redirect_count":0,"total_time":0.417869,"namelookup_time":0.00029,"connect_time":0.000611,"pretransfer_time":0.000886,"size_upload":42,"size_download":94,"speed_download":224,"speed_upload":100,"download_content_length":-1,"upload_content_length":42,"starttransfer_time":0.417709,"redirect_time":0,"redirect_url":"","primary_ip":"::1","certinfo":[],"primary_port":8888,"local_ip":"::1","local_port":59689,"http_version":2,"protocol":1,"ssl_verifyresult":0,"scheme":"http","appconnect_time_us":0,"connect_time_us":611,"namelookup_time_us":290,"pretransfer_time_us":886,"redirect_time_us":0,"starttransfer_time_us":417709,"posttransfer_time_us":884,"total_time_us":417869,"effective_method":"POST","capath":"","cainfo":""}
+[25-Feb-2025 23:42:55 UTC] WordPress response status: 401
+[25-Feb-2025 23:42:55 UTC] WordPress response: {"code":"invalid_authorization","message":"Valid Bearer token required","data":{"status":401}}
+[25-Feb-2025 23:46:55 UTC] Admin login endpoint called at 2025-02-25 23:46:55
+[25-Feb-2025 23:46:55 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:46:55 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:46:55 UTC] Server running on port: 8001
+[25-Feb-2025 23:46:55 UTC] Server request received from: ::1
+[25-Feb-2025 23:46:55 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:46:55 UTC] Admin login request received: {"username":"admin","password":"admin123","remember_me":false}
+[25-Feb-2025 23:47:11 UTC] Admin login endpoint called at 2025-02-25 23:47:11
+[25-Feb-2025 23:47:11 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:47:11 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:47:11 UTC] Server running on port: 8001
+[25-Feb-2025 23:47:11 UTC] Server request received from: ::1
+[25-Feb-2025 23:47:11 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:47:11 UTC] Admin login request received: {"username":"admin","password":"admin123","remember_me":false}
+[25-Feb-2025 23:47:22 UTC] Admin login endpoint called at 2025-02-25 23:47:22
+[25-Feb-2025 23:47:22 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:47:22 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:47:22 UTC] Server running on port: 8001
+[25-Feb-2025 23:47:22 UTC] Server request received from: ::1
+[25-Feb-2025 23:47:22 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:47:22 UTC] Admin login request received: {"username":"admin","password":"password"}
+[25-Feb-2025 23:47:22 UTC] Using test admin credentials for development mode
+[25-Feb-2025 23:48:22 UTC] Admin login endpoint called at 2025-02-25 23:48:22
+[25-Feb-2025 23:48:22 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:48:22 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:48:22 UTC] Server running on port: 8001
+[25-Feb-2025 23:48:22 UTC] Server request received from: ::1
+[25-Feb-2025 23:48:22 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:48:22 UTC] Admin login request received: {"username":"admin","password":"password"}
+[25-Feb-2025 23:48:22 UTC] Using test admin credentials for development mode
+[25-Feb-2025 23:48:22 UTC] Admin login endpoint called at 2025-02-25 23:48:22
+[25-Feb-2025 23:48:22 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:48:22 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:48:22 UTC] Server running on port: 8001
+[25-Feb-2025 23:48:22 UTC] Server request received from: ::1
+[25-Feb-2025 23:48:22 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:48:22 UTC] Admin login request received: {"username":"wrong","password":"wrong"}
+[25-Feb-2025 23:48:47 UTC] Admin login endpoint called at 2025-02-25 23:48:47
+[25-Feb-2025 23:48:47 UTC] Environment detected: LOCAL
+[25-Feb-2025 23:48:47 UTC] WordPress URL: http://localhost:8888
+[25-Feb-2025 23:48:47 UTC] Server running on port: 8001
+[25-Feb-2025 23:48:47 UTC] Server request received from: ::1
+[25-Feb-2025 23:48:47 UTC] Requested URI: /auth/admin-login.php
+[25-Feb-2025 23:48:47 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":false}
+[25-Feb-2025 23:48:47 UTC] Using test admin credentials for development mode
+[26-Feb-2025 07:58:25 UTC] Admin login endpoint called at 2025-02-26 07:58:25
+[26-Feb-2025 07:58:25 UTC] Admin login endpoint called at 2025-02-26 07:58:25
+[26-Feb-2025 07:58:25 UTC] Environment detected: LOCAL
+[26-Feb-2025 07:58:25 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 07:58:25 UTC] Server running on port: 8001
+[26-Feb-2025 07:58:25 UTC] Server request received from: ::1
+[26-Feb-2025 07:58:25 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 07:58:25 UTC] Admin login request received: {"username":"admin","password":"admine","remember_me":false}
+[26-Feb-2025 07:58:27 UTC] Admin login endpoint called at 2025-02-26 07:58:27
+[26-Feb-2025 07:58:27 UTC] Environment detected: LOCAL
+[26-Feb-2025 07:58:27 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 07:58:27 UTC] Server running on port: 8001
+[26-Feb-2025 07:58:27 UTC] Server request received from: ::1
+[26-Feb-2025 07:58:27 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 07:58:27 UTC] Admin login request received: {"username":"admin","password":"admine","remember_me":false}
+[26-Feb-2025 07:58:28 UTC] Admin login endpoint called at 2025-02-26 07:58:28
+[26-Feb-2025 07:58:28 UTC] Environment detected: LOCAL
+[26-Feb-2025 07:58:28 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 07:58:28 UTC] Server running on port: 8001
+[26-Feb-2025 07:58:28 UTC] Server request received from: ::1
+[26-Feb-2025 07:58:28 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 07:58:28 UTC] Admin login request received: {"username":"admin","password":"admine","remember_me":false}
+[26-Feb-2025 07:58:29 UTC] Admin login endpoint called at 2025-02-26 07:58:29
+[26-Feb-2025 07:58:29 UTC] Environment detected: LOCAL
+[26-Feb-2025 07:58:29 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 07:58:29 UTC] Server running on port: 8001
+[26-Feb-2025 07:58:29 UTC] Server request received from: ::1
+[26-Feb-2025 07:58:29 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 07:58:29 UTC] Admin login request received: {"username":"admin","password":"admine","remember_me":false}
+[26-Feb-2025 07:59:41 UTC] Admin login endpoint called at 2025-02-26 07:59:41
+[26-Feb-2025 07:59:41 UTC] Environment detected: LOCAL
+[26-Feb-2025 07:59:41 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 07:59:41 UTC] Server running on port: 8001
+[26-Feb-2025 07:59:41 UTC] Server request received from: ::1
+[26-Feb-2025 07:59:41 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 07:59:41 UTC] Admin login request received: {"username":"admin","password":"admin123","remember_me":false}
+[26-Feb-2025 07:59:45 UTC] Admin login endpoint called at 2025-02-26 07:59:45
+[26-Feb-2025 07:59:45 UTC] Environment detected: LOCAL
+[26-Feb-2025 07:59:45 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 07:59:45 UTC] Server running on port: 8001
+[26-Feb-2025 07:59:45 UTC] Server request received from: ::1
+[26-Feb-2025 07:59:45 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 07:59:45 UTC] Admin login request received: {"username":"admin","password":"admin123","remember_me":false}
+[26-Feb-2025 07:59:51 UTC] Admin login endpoint called at 2025-02-26 07:59:51
+[26-Feb-2025 07:59:51 UTC] Environment detected: LOCAL
+[26-Feb-2025 07:59:51 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 07:59:51 UTC] Server running on port: 8001
+[26-Feb-2025 07:59:51 UTC] Server request received from: ::1
+[26-Feb-2025 07:59:51 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 07:59:51 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":false}
+[26-Feb-2025 07:59:51 UTC] Using test admin credentials for development mode
+[26-Feb-2025 08:36:08 UTC] Admin login endpoint called at 2025-02-26 08:36:08
+[26-Feb-2025 08:36:08 UTC] Environment detected: LOCAL
+[26-Feb-2025 08:36:08 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 08:36:08 UTC] Server running on port: 8001
+[26-Feb-2025 08:36:08 UTC] Server request received from: ::1
+[26-Feb-2025 08:36:08 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 08:36:08 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":false}
+[26-Feb-2025 08:36:08 UTC] Using test admin credentials for development mode
+[26-Feb-2025 08:43:08 UTC] Admin login endpoint called at 2025-02-26 08:43:08
+[26-Feb-2025 08:43:08 UTC] Admin login endpoint called at 2025-02-26 08:43:08
+[26-Feb-2025 08:43:08 UTC] Environment detected: LOCAL
+[26-Feb-2025 08:43:08 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 08:43:08 UTC] Server running on port: 8001
+[26-Feb-2025 08:43:08 UTC] Server request received from: ::1
+[26-Feb-2025 08:43:08 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 08:43:08 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":false}
+[26-Feb-2025 08:43:08 UTC] Using test admin credentials for development mode
+[26-Feb-2025 08:48:12 UTC] Admin login endpoint called at 2025-02-26 08:48:12
+[26-Feb-2025 08:48:12 UTC] Admin login endpoint called at 2025-02-26 08:48:12
+[26-Feb-2025 08:48:12 UTC] Environment detected: LOCAL
+[26-Feb-2025 08:48:12 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 08:48:12 UTC] Server running on port: 8001
+[26-Feb-2025 08:48:12 UTC] Server request received from: ::1
+[26-Feb-2025 08:48:12 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 08:48:12 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":true}
+[26-Feb-2025 08:48:12 UTC] Using test admin credentials for development mode
+[26-Feb-2025 11:33:13 UTC] Admin login endpoint called at 2025-02-26 11:33:13
+[26-Feb-2025 11:33:13 UTC] Admin login endpoint called at 2025-02-26 11:33:13
+[26-Feb-2025 11:33:13 UTC] Environment detected: LOCAL
+[26-Feb-2025 11:33:13 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 11:33:13 UTC] Server running on port: 8001
+[26-Feb-2025 11:33:13 UTC] Server request received from: ::1
+[26-Feb-2025 11:33:13 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 11:33:13 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":false}
+[26-Feb-2025 11:33:13 UTC] Using test admin credentials for development mode
+[26-Feb-2025 11:36:17 UTC] Admin login endpoint called at 2025-02-26 11:36:17
+[26-Feb-2025 11:36:17 UTC] Admin login endpoint called at 2025-02-26 11:36:17
+[26-Feb-2025 11:36:17 UTC] Environment detected: LOCAL
+[26-Feb-2025 11:36:17 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 11:36:17 UTC] Server running on port: 8001
+[26-Feb-2025 11:36:17 UTC] Server request received from: ::1
+[26-Feb-2025 11:36:17 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 11:36:17 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":false}
+[26-Feb-2025 11:36:17 UTC] Using test admin credentials for development mode
+[26-Feb-2025 11:40:09 UTC] Admin login endpoint called at 2025-02-26 11:40:09
+[26-Feb-2025 11:40:09 UTC] Admin login endpoint called at 2025-02-26 11:40:09
+[26-Feb-2025 11:40:09 UTC] Environment detected: LOCAL
+[26-Feb-2025 11:40:09 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 11:40:09 UTC] Server running on port: 8001
+[26-Feb-2025 11:40:09 UTC] Server request received from: ::1
+[26-Feb-2025 11:40:09 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 11:40:09 UTC] Admin login request received: {"username":"admin","password":"admin123","remember_me":false}
+[26-Feb-2025 11:40:13 UTC] Admin login endpoint called at 2025-02-26 11:40:13
+[26-Feb-2025 11:40:13 UTC] Environment detected: LOCAL
+[26-Feb-2025 11:40:13 UTC] WordPress URL: http://localhost:8888
+[26-Feb-2025 11:40:13 UTC] Server running on port: 8001
+[26-Feb-2025 11:40:13 UTC] Server request received from: ::1
+[26-Feb-2025 11:40:13 UTC] Requested URI: /auth/admin-login.php
+[26-Feb-2025 11:40:13 UTC] Admin login request received: {"username":"admin","password":"password","remember_me":false}
+[26-Feb-2025 11:40:13 UTC] Using test admin credentials for development mode
+[04-Mar-2025 22:20:01 UTC] Admin login endpoint called at 2025-03-04 22:20:01
+[04-Mar-2025 22:20:01 UTC] Environment detected: LOCAL
+[04-Mar-2025 22:20:01 UTC] WordPress URL: http://localhost:8888
+[04-Mar-2025 22:20:01 UTC] Server running on port: 8000
+[04-Mar-2025 22:20:01 UTC] Server request received from: ::1
+[04-Mar-2025 22:20:01 UTC] Requested URI: /auth/admin-login.php
+[04-Mar-2025 22:20:01 UTC] Admin login request received: {"email":"admin@charterhub.com","password":"admin123"}
+[05-Mar-2025 07:20:10 UTC] Admin login endpoint called at 2025-03-05 07:20:10
+[05-Mar-2025 07:20:10 UTC] Environment detected: LOCAL
+[05-Mar-2025 07:20:10 UTC] WordPress URL: http://localhost:8888
+[05-Mar-2025 07:20:10 UTC] Server running on port: 8000
+[05-Mar-2025 07:20:10 UTC] Server request received from: ::1
+[05-Mar-2025 07:20:10 UTC] Requested URI: /auth/admin-login.php
+[05-Mar-2025 07:20:10 UTC] Admin login request received: {"username":"admin","password":"admin123"}
+[05-Mar-2025 07:22:06 UTC] Admin login endpoint called at 2025-03-05 07:22:06
+[05-Mar-2025 07:22:06 UTC] Environment detected: LOCAL
+[05-Mar-2025 07:22:06 UTC] WordPress URL: http://localhost:8888
+[05-Mar-2025 07:22:06 UTC] Server running on port: 8000
+[05-Mar-2025 07:22:06 UTC] Server request received from: ::1
+[05-Mar-2025 07:22:06 UTC] Requested URI: /auth/admin-login.php
+[05-Mar-2025 07:22:06 UTC] Admin login request received: {"username":"admin@charterhub.com","password":"admin123"}
+[05-Mar-2025 07:22:27 UTC] Admin login endpoint called at 2025-03-05 07:22:27
+[05-Mar-2025 07:22:27 UTC] Environment detected: LOCAL
+[05-Mar-2025 07:22:27 UTC] WordPress URL: http://localhost:8888
+[05-Mar-2025 07:22:27 UTC] Server running on port: 8000
+[05-Mar-2025 07:22:27 UTC] Server request received from: ::1
+[05-Mar-2025 07:22:27 UTC] Requested URI: /auth/admin-login.php
+[05-Mar-2025 07:22:27 UTC] Admin login request received: {"username":"admin@charterhub.com","password":"admin123"}
+[05-Mar-2025 07:22:27 UTC] Using test admin credentials for development mode
+[05-Mar-2025 07:33:12 UTC] Admin login endpoint called at 2025-03-05 07:33:12
+[05-Mar-2025 07:33:12 UTC] Environment detected: LOCAL
+[05-Mar-2025 07:33:12 UTC] WordPress URL: http://localhost:8888
+[05-Mar-2025 07:33:12 UTC] Server running on port: 8000
+[05-Mar-2025 07:33:12 UTC] Server request received from: ::1
+[05-Mar-2025 07:33:12 UTC] Requested URI: /auth/admin-login.php
+[05-Mar-2025 07:33:12 UTC] Admin login request received: {"username":"admin@charterhub.com","password":"admin123"}
+[05-Mar-2025 07:33:12 UTC] Using test admin credentials for development mode
+[05-Mar-2025 07:34:50 UTC] Admin login endpoint called at 2025-03-05 07:34:50
+[05-Mar-2025 07:34:50 UTC] Environment detected: LOCAL
+[05-Mar-2025 07:34:50 UTC] WordPress URL: http://localhost:8888
+[05-Mar-2025 07:34:50 UTC] Server running on port: 8000
+[05-Mar-2025 07:34:50 UTC] Server request received from: ::1
+[05-Mar-2025 07:34:50 UTC] Requested URI: /auth/admin-login.php
+[05-Mar-2025 07:34:50 UTC] Admin login request received: {"username":"admin@charterhub.com","password":"admin123"}
+[05-Mar-2025 07:34:50 UTC] Using test admin credentials for development mode

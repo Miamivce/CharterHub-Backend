@@ -1,0 +1,1 @@
+Add Access-Control-Expose-Headers: X-CSRF-Token header to config.php

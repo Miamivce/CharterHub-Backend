@@ -1,0 +1,69 @@
+2025-03-13 20:36:29 - {
+    "timestamp": "2025-03-13 20:36:29",
+    "method": "POST",
+    "headers": {
+        "Host": "localhost:8000",
+        "User-Agent": "curl\/8.7.1",
+        "Accept": "*\/*",
+        "Content-Type": "application\/json",
+        "Content-Length": "57"
+    },
+    "post_data": [],
+    "raw_data": "{\"email\":\"testuser@example.com\",\"password\":\"password123\"}",
+    "json_data": {
+        "email": "testuser@example.com",
+        "password": "password123"
+    }
+}
+
+2025-03-13 20:36:29 - DATABASE: Connection successful
+2025-03-13 20:36:58 - {
+    "timestamp": "2025-03-13 20:36:58",
+    "method": "POST",
+    "headers": {
+        "Host": "localhost:8000",
+        "User-Agent": "curl\/8.7.1",
+        "Accept": "*\/*",
+        "Content-Type": "application\/json",
+        "Content-Length": "57"
+    },
+    "post_data": [],
+    "raw_data": "{\"email\":\"testuser@example.com\",\"password\":\"password123\"}",
+    "json_data": {
+        "email": "testuser@example.com",
+        "password": "password123"
+    }
+}
+
+2025-03-13 20:36:58 - DATABASE: Connection successful
+2025-03-13 20:36:58 - DATABASE: Tables in database: dev_users, wp_auth_logs, wp_booking_documents, wp_booking_guests, wp_bookings, wp_charterhub_auth_logs, wp_charterhub_booking_guests, wp_charterhub_bookings, wp_charterhub_document_relations, wp_charterhub_documents, wp_charterhub_jwt_tokens, wp_charterhub_test_log, wp_charterhub_token_blacklist, wp_charterhub_tokens, wp_charterhub_users, wp_jwt_tokens, wp_options, wp_posts, wp_usermeta, wp_users
+2025-03-13 20:36:58 - DATABASE: wp_charterhub_jwt_tokens table exists
+2025-03-13 20:36:58 - DATABASE: wp_jwt_tokens table exists
+2025-03-13 20:36:58 - USER: Testing login for email: testuser@example.com
+2025-03-13 20:36:58 - USER: User found with ID: 20, Role: client
+2025-03-13 20:36:58 - USER: Password verification FAILED
+2025-03-13 20:37:25 - {
+    "timestamp": "2025-03-13 20:37:25",
+    "method": "POST",
+    "headers": {
+        "Host": "localhost:8000",
+        "User-Agent": "curl\/8.7.1",
+        "Accept": "*\/*",
+        "Content-Type": "application\/json",
+        "Content-Length": "46"
+    },
+    "post_data": [],
+    "raw_data": "{\"email\":\"test1@me.com\",\"password\":\"Test123!\"}",
+    "json_data": {
+        "email": "test1@me.com",
+        "password": "Test123!"
+    }
+}
+
+2025-03-13 20:37:25 - DATABASE: Connection successful
+2025-03-13 20:37:25 - DATABASE: Tables in database: dev_users, wp_auth_logs, wp_booking_documents, wp_booking_guests, wp_bookings, wp_charterhub_auth_logs, wp_charterhub_booking_guests, wp_charterhub_bookings, wp_charterhub_document_relations, wp_charterhub_documents, wp_charterhub_jwt_tokens, wp_charterhub_test_log, wp_charterhub_token_blacklist, wp_charterhub_tokens, wp_charterhub_users, wp_jwt_tokens, wp_options, wp_posts, wp_usermeta, wp_users
+2025-03-13 20:37:25 - DATABASE: wp_charterhub_jwt_tokens table exists
+2025-03-13 20:37:25 - DATABASE: wp_jwt_tokens table exists
+2025-03-13 20:37:25 - USER: Testing login for email: test1@me.com
+2025-03-13 20:37:25 - USER: User found with ID: 1, Role: client
+2025-03-13 20:37:25 - USER: Password verification FAILED

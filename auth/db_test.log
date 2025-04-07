@@ -1,0 +1,54 @@
+2025-03-13 20:48:00 - DB Test Started
+2025-03-13 20:48:00 - Including config.php
+2025-03-13 20:48:00 - Config loaded successfully
+2025-03-13 20:48:00 - Testing database connection
+2025-03-13 20:48:00 - Database connection successful
+2025-03-13 20:48:00 - Checking tables in database
+2025-03-13 20:48:00 - Found 20 tables in database
+2025-03-13 20:48:00 - Table found: dev_users
+2025-03-13 20:48:00 - Table found: wp_auth_logs
+2025-03-13 20:48:00 - Table found: wp_booking_documents
+2025-03-13 20:48:00 - Table found: wp_booking_guests
+2025-03-13 20:48:00 - Table found: wp_bookings
+2025-03-13 20:48:00 - Table found: wp_charterhub_auth_logs
+2025-03-13 20:48:00 - Table found: wp_charterhub_booking_guests
+2025-03-13 20:48:00 - Table found: wp_charterhub_bookings
+2025-03-13 20:48:00 - Table found: wp_charterhub_document_relations
+2025-03-13 20:48:00 - Table found: wp_charterhub_documents
+2025-03-13 20:48:00 - Table found: wp_charterhub_jwt_tokens
+2025-03-13 20:48:00 - Table found: wp_charterhub_test_log
+2025-03-13 20:48:00 - Table found: wp_charterhub_token_blacklist
+2025-03-13 20:48:00 - Table found: wp_charterhub_tokens
+2025-03-13 20:48:00 - Table found: wp_charterhub_users
+2025-03-13 20:48:00 - Table found: wp_jwt_tokens
+2025-03-13 20:48:00 - Table found: wp_options
+2025-03-13 20:48:00 - Table found: wp_posts
+2025-03-13 20:48:00 - Table found: wp_usermeta
+2025-03-13 20:48:00 - Table found: wp_users
+2025-03-13 20:48:00 - ✅ Required table exists: wp_charterhub_users
+2025-03-13 20:48:00 - Table wp_charterhub_users columns: id (bigint unsigned), email (varchar(255)), password (varchar(255)), username (varchar(100)), display_name (varchar(255)), first_name (varchar(100)), last_name (varchar(100)), phone_number (varchar(50)), company (varchar(255)), role (enum('admin','client')), token_version (int), verified (tinyint(1)), verification_token (varchar(255)), verification_expires (datetime), reset_password_token (varchar(255)), reset_password_expires (datetime), refresh_token (text), last_login (datetime), last_ip (varchar(45)), login_attempts (int), metadata (json), created_at (datetime), updated_at (datetime)
+2025-03-13 20:48:00 - Table wp_charterhub_users has 39 rows
+2025-03-13 20:48:00 - ✅ Required table exists: wp_charterhub_jwt_tokens
+2025-03-13 20:48:00 - Table wp_charterhub_jwt_tokens columns: id (bigint unsigned), user_id (bigint unsigned), token_hash (varchar(255)), refresh_token_hash (varchar(512)), expires_at (datetime), refresh_expires_at (datetime), created_at (datetime), revoked (tinyint(1)), revoked_at (datetime), revoked_reason (varchar(255)), last_used_at (datetime), notes (text)
+2025-03-13 20:48:00 - Table wp_charterhub_jwt_tokens has 438 rows
+2025-03-13 20:48:00 - ✅ Required table exists: wp_charterhub_token_blacklist
+2025-03-13 20:48:00 - Table wp_charterhub_token_blacklist columns: id (int), token_id (varchar(255)), user_id (int), original_exp (datetime), blacklisted_at (datetime), reason (varchar(50))
+2025-03-13 20:48:00 - Table wp_charterhub_token_blacklist has 0 rows
+2025-03-13 20:48:00 - ✅ Required table exists: wp_charterhub_auth_logs
+2025-03-13 20:48:00 - Table wp_charterhub_auth_logs columns: id (bigint), user_id (bigint), action (varchar(50)), status (enum('success','failure')), ip_address (varchar(45)), user_agent (varchar(255)), details (json), created_at (datetime)
+2025-03-13 20:48:00 - Table wp_charterhub_auth_logs has 296 rows
+2025-03-13 20:48:00 - Testing specifics of the JWT tokens table
+2025-03-13 20:48:00 - Found 5 tokens in the database
+2025-03-13 20:48:00 - Token ID: 1, User ID: 18, Expires: 2025-03-11 14:03:57, Revoked: No
+2025-03-13 20:48:00 - Token ID: 2, User ID: 18, Expires: 2025-03-11 14:04:07, Revoked: No
+2025-03-13 20:48:00 - Token ID: 3, User ID: 18, Expires: 2025-03-11 14:04:24, Revoked: No
+2025-03-13 20:48:00 - Token ID: 4, User ID: 18, Expires: 2025-03-11 14:04:29, Revoked: No
+2025-03-13 20:48:00 - Token ID: 5, User ID: 18, Expires: 2025-03-11 14:19:43, Revoked: No
+2025-03-13 20:48:00 - Testing specifics of the users table
+2025-03-13 20:48:00 - Found 5 users in the database
+2025-03-13 20:48:00 - User ID: 1, Email: test1@me.com, Role: client, Verified: Yes, Token Version: 1
+2025-03-13 20:48:00 - User ID: 4, Email: test2@me.com, Role: client, Verified: Yes, Token Version: 1
+2025-03-13 20:48:00 - User ID: 5, Email: test3@me.com, Role: client, Verified: Yes, Token Version: 1
+2025-03-13 20:48:00 - User ID: 6, Email: test4@me.com, Role: client, Verified: Yes, Token Version: 1
+2025-03-13 20:48:00 - User ID: 8, Email: test5@me.com, Role: client, Verified: Yes, Token Version: 1
+2025-03-13 20:48:00 - Database test completed successfully

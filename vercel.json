@@ -1,0 +1,25 @@
+{
+  "functions": {
+    "api/**/*.php": {
+      "runtime": "vercel-php@0.6.0"
+    },
+    "auth/**/*.php": {
+      "runtime": "vercel-php@0.6.0"
+    },
+    "index.php": {
+      "runtime": "vercel-php@0.6.0"
+    }
+  },
+  "routes": [
+    { "src": "/(.*)", "dest": "/index.php" }
+  ],
+  "env": {
+    "DB_HOST": "@db_host",
+    "DB_USER": "@db_user",
+    "DB_PASSWORD": "@db_password",
+    "DB_NAME": "@db_name",
+    "JWT_SECRET": "@jwt_secret",
+    "JWT_REFRESH_SECRET": "@jwt_refresh_secret",
+    "FRONTEND_URL": "@frontend_url"
+  }
+} 

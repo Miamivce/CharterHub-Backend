@@ -1,0 +1,21 @@
+2025-03-13 20:52:12 - JWT Tables Fix Script Started
+2025-03-13 20:52:12 - Including config.php
+2025-03-13 20:52:12 - Config loaded successfully
+2025-03-13 20:52:12 - Testing database connection
+2025-03-13 20:52:12 - Database connection successful
+2025-03-13 20:52:12 - Checking if wp_charterhub_jwt_tokens table exists
+2025-03-13 20:52:12 - ✅ wp_charterhub_jwt_tokens table exists
+2025-03-13 20:52:12 - Checking if wp_jwt_tokens table exists
+2025-03-13 20:52:12 - Found incorrect table wp_jwt_tokens
+2025-03-13 20:52:12 - Migrating data from wp_jwt_tokens to wp_charterhub_jwt_tokens
+2025-03-13 20:52:12 - Found 189 records to migrate
+2025-03-13 20:52:12 - Migrated 189 records to wp_charterhub_jwt_tokens
+2025-03-13 20:52:12 - Renaming wp_jwt_tokens to wp_jwt_tokens_old
+2025-03-13 20:52:12 - ✅ Table renamed successfully
+2025-03-13 20:52:12 - Creating view for backward compatibility
+2025-03-13 20:52:12 - ✅ Created view wp_jwt_tokens pointing to wp_charterhub_jwt_tokens
+2025-03-13 20:52:12 - Performing final check
+2025-03-13 20:52:12 - ✅ wp_charterhub_jwt_tokens table exists
+2025-03-13 20:52:12 - wp_charterhub_jwt_tokens has 627 rows
+2025-03-13 20:52:12 - ✅ wp_jwt_tokens view exists
+2025-03-13 20:52:12 - JWT Tables Fix Script Completed

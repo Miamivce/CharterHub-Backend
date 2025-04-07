@@ -1,0 +1,62 @@
+# Ignore development/debugging files
+*.log
+*.sql
+*.sqlite
+*.bak
+*.backup
+*.old
+php_errors.log
+debug_response.php
+debug/
+debug-*.php
+test-*.php
+test.php
+test_*.php
+
+# Version control
+.git
+.gitignore
+.svn
+.hg
+
+# IDE files
+.idea/
+.vscode/
+*.sublime-*
+*.swp
+*.swo
+
+# OS generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# WordPress core
+wp-admin/
+wp-includes/
+wp-content/plugins/
+wp-content/themes/
+wp-content/upgrade/
+wp-content/backup-db/
+wp-content/backups/
+wp-content/cache/
+wp-content/uploads/
+
+# Documentation and temp files
+*.md
+README*
+LICENSE*
+CHANGELOG*
+tmp/
+temp/
+
+# Composer
+vendor/
+!vendor/autoload.php
+
+# Builds and assets
+node_modules/ 
