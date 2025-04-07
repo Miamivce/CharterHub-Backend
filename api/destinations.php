@@ -42,13 +42,30 @@ function handle_get_request() {
     $conn = get_database_connection();
     
     // Check if an ID was provided to get a specific destination
-    $destination_id = isset($_GET['id']) ? intval($_GET['id']) : null;
+    $location_id = isset($_GET['id']) ? intval($_GET['id']) : null;
     
-    if ($destination_id) {
+    if ($location_id) {
         // Get a specific destination by ID
-        $query = "SELECT * FROM wp_charterhub_destinations WHERE id = ?";
+        $query = "
+            SELECT 
+                p.ID as id,
+                p.post_title as name,
+                p.post_content as description,
+                (SELECT pm1.meta_value FROM wp_postmeta pm1 WHERE pm1.post_id = p.ID AND pm1.meta_key = 'regions' LIMIT 1) as regions,
+                (SELECT pm2.meta_value FROM wp_postmeta pm2 WHERE pm2.post_id = p.ID AND pm2.meta_key = 'highlights' LIMIT 1) as highlights,
+                (SELECT pm3.meta_value FROM wp_postmeta pm3 WHERE pm3.post_id = p.ID AND pm3.meta_key = 'best_time_to_visit' LIMIT 1) as best_time_to_visit,
+                (SELECT pm4.meta_value FROM wp_postmeta pm4 WHERE pm4.post_id = p.ID AND pm4.meta_key = 'climate' LIMIT 1) as climate,
+                (SELECT pm5.meta_value FROM wp_postmeta pm5 WHERE pm5.post_id = p.ID AND pm5.meta_key = '_thumbnail_id' LIMIT 1) as featured_image_id,
+                p.post_modified as updated_at
+            FROM 
+                wp_posts p
+            WHERE 
+                p.post_type = 'location'
+                AND p.post_status = 'publish'
+                AND p.ID = ?
+        ";
         $stmt = $conn->prepare($query);
-        $stmt->bind_param("i", $destination_id);
+        $stmt->bind_param("i", $location_id);
         $stmt->execute();
         $result = $stmt->get_result();
         
@@ -61,12 +78,53 @@ function handle_get_request() {
         
         $destination = $result->fetch_assoc();
         
-        // Parse JSON fields
-        if ($destination['regions']) {
-            $destination['regions'] = json_decode($destination['regions']);
+        // Get the featured image URL if available
+        if (!empty($destination['featured_image_id'])) {
+            $image_query = "
+                SELECT guid FROM wp_posts 
+                WHERE ID = ? AND post_type = 'attachment'
+            ";
+            $image_stmt = $conn->prepare($image_query);
+            $image_stmt->bind_param("i", $destination['featured_image_id']);
+            $image_stmt->execute();
+            $image_result = $image_stmt->get_result();
+            
+            if ($image_result->num_rows > 0) {
+                $image = $image_result->fetch_assoc();
+                $destination['featured_image'] = $image['guid'];
+            } else {
+                $destination['featured_image'] = '';
+            }
+            
+            $image_stmt->close();
+            unset($destination['featured_image_id']);
+        } else {
+            $destination['featured_image'] = '';
+            unset($destination['featured_image_id']);
         }
-        if ($destination['highlights']) {
-            $destination['highlights'] = json_decode($destination['highlights']);
+        
+        // Convert highlights to array if it's serialized
+        if (!empty($destination['highlights'])) {
+            if (is_serialized($destination['highlights'])) {
+                $destination['highlights'] = unserialize($destination['highlights']);
+            } else {
+                // If not serialized, make sure it's an array
+                $destination['highlights'] = [$destination['highlights']];
+            }
+        } else {
+            $destination['highlights'] = [];
+        }
+        
+        // Convert regions to array if it's serialized
+        if (!empty($destination['regions'])) {
+            if (is_serialized($destination['regions'])) {
+                $destination['regions'] = unserialize($destination['regions']);
+            } else {
+                // If not serialized, make sure it's an array
+                $destination['regions'] = [$destination['regions']];
+            }
+        } else {
+            $destination['regions'] = [];
         }
         
         $stmt->close();
@@ -79,7 +137,26 @@ function handle_get_request() {
         ]);
     } else {
         // Get all destinations
-        $query = "SELECT * FROM wp_charterhub_destinations ORDER BY name ASC";
+        $query = "
+            SELECT 
+                p.ID as id,
+                p.post_title as name,
+                p.post_content as description,
+                (SELECT pm1.meta_value FROM wp_postmeta pm1 WHERE pm1.post_id = p.ID AND pm1.meta_key = 'regions' LIMIT 1) as regions,
+                (SELECT pm2.meta_value FROM wp_postmeta pm2 WHERE pm2.post_id = p.ID AND pm2.meta_key = 'highlights' LIMIT 1) as highlights,
+                (SELECT pm3.meta_value FROM wp_postmeta pm3 WHERE pm3.post_id = p.ID AND pm3.meta_key = 'best_time_to_visit' LIMIT 1) as best_time_to_visit,
+                (SELECT pm4.meta_value FROM wp_postmeta pm4 WHERE pm4.post_id = p.ID AND pm4.meta_key = 'climate' LIMIT 1) as climate,
+                (SELECT pm5.meta_value FROM wp_postmeta pm5 WHERE pm5.post_id = p.ID AND pm5.meta_key = '_thumbnail_id' LIMIT 1) as featured_image_id,
+                p.post_modified as updated_at
+            FROM 
+                wp_posts p
+            WHERE 
+                p.post_type = 'location'
+                AND p.post_status = 'publish'
+            ORDER BY 
+                p.post_title ASC
+            LIMIT 50
+        ";
         $result = $conn->query($query);
         
         if (!$result) {
@@ -92,12 +169,49 @@ function handle_get_request() {
         
         $destinations = [];
         while ($row = $result->fetch_assoc()) {
-            // Parse JSON fields
-            if ($row['regions']) {
-                $row['regions'] = json_decode($row['regions']);
+            // Get the featured image URL if available
+            if (!empty($row['featured_image_id'])) {
+                $image_query = "
+                    SELECT guid FROM wp_posts 
+                    WHERE ID = {$row['featured_image_id']} AND post_type = 'attachment'
+                ";
+                $image_result = $conn->query($image_query);
+                
+                if ($image_result && $image_result->num_rows > 0) {
+                    $image = $image_result->fetch_assoc();
+                    $row['featured_image'] = $image['guid'];
+                } else {
+                    $row['featured_image'] = '';
+                }
+                
+                unset($row['featured_image_id']);
+            } else {
+                $row['featured_image'] = '';
+                unset($row['featured_image_id']);
             }
-            if ($row['highlights']) {
-                $row['highlights'] = json_decode($row['highlights']);
+            
+            // Convert highlights to array if it's serialized
+            if (!empty($row['highlights'])) {
+                if (is_serialized($row['highlights'])) {
+                    $row['highlights'] = unserialize($row['highlights']);
+                } else {
+                    // If not serialized, make sure it's an array
+                    $row['highlights'] = [$row['highlights']];
+                }
+            } else {
+                $row['highlights'] = [];
+            }
+            
+            // Convert regions to array if it's serialized
+            if (!empty($row['regions'])) {
+                if (is_serialized($row['regions'])) {
+                    $row['regions'] = unserialize($row['regions']);
+                } else {
+                    // If not serialized, make sure it's an array
+                    $row['regions'] = [$row['regions']];
+                }
+            } else {
+                $row['regions'] = [];
             }
             
             $destinations[] = $row;
@@ -113,13 +227,53 @@ function handle_get_request() {
     }
 }
 
+// Helper function to determine if a string is serialized
+function is_serialized($data) {
+    // If it isn't a string, it isn't serialized
+    if (!is_string($data)) {
+        return false;
+    }
+    
+    // Check for serialization signature
+    $data = trim($data);
+    if ('N;' == $data) {
+        return true;
+    }
+    if (!preg_match('/^([adObis]):/', $data, $badions)) {
+        return false;
+    }
+    
+    switch ($badions[1]) {
+        case 'a':
+        case 'O':
+        case 's':
+            if (preg_match("/^{$badions[1]}:[0-9]+:.*[;}]\$/s", $data)) {
+                return true;
+            }
+            break;
+        case 'b':
+        case 'i':
+        case 'd':
+            if (preg_match("/^{$badions[1]}:[0-9.E-]+;\$/", $data)) {
+                return true;
+            }
+            break;
+    }
+    
+    return false;
+}
+
 // Helper function to get database connection
 function get_database_connection() {
-    // Import database configuration
-    require_once __DIR__ . '/../db-config.php';
+    // Get database configuration from environment variables
+    $db_host = getenv('DB_HOST') ?: 'mysql-charterhub-charterhub.c.aivencloud.com';
+    $db_port = getenv('DB_PORT') ?: '19174';
+    $db_name = getenv('DB_NAME') ?: 'defaultdb';
+    $db_user = getenv('DB_USER') ?: 'avnadmin';
+    $db_pass = getenv('DB_PASSWORD') ?: 'AVNS_HCZbm5bZJE1L9C8Pz8C';
     
     // Create connection
-    $conn = new mysqli($db_config['host'], $db_config['username'], $db_config['password'], $db_config['dbname']);
+    $conn = new mysqli($db_host, $db_user, $db_pass, $db_name, $db_port);
     
     // Check connection
     if ($conn->connect_error) {
