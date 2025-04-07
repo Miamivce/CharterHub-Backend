@@ -12,15 +12,29 @@ services:
         value: 19174
       - key: DB_USER
         value: avnadmin
-      - key: DB_PASS
-        value: AVNS_HCZbm5bZJE1L9C8Pz8C
+      - key: DB_PASSWORD
+        sync: false
       - key: DB_NAME
-        value: defaultdb
-      - key: DB_SSL
+        value: charterhub
+      - key: DB_SSL_MODE
         value: REQUIRED
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
+      - key: JWT_ISSUER
+        value: charterhub-api
+      - key: JWT_AUDIENCE
+        value: charterhub-client
+      - key: JWT_EXPIRATION
+        value: 3600
+      - key: JWT_REFRESH_EXPIRATION
+        value: 604800
       - key: FRONTEND_URL
-        value: https://app.yachtstory.com 
+        value: https://app.yachtstory.com
+      - key: API_BASE_URL
+        value: https://api.yachtstory.com
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false 
