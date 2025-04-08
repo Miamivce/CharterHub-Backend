@@ -15,9 +15,42 @@ if (!defined('CHARTERHUB_LOADED')) {
 }
 
 // Include required dependencies
-require_once __DIR__ . '/../db-config.php';
-require_once __DIR__ . '/jwt-core.php';
+// require_once __DIR__ . '/../db-config.php';
+// require_once __DIR__ . '/jwt-core.php'; // Removed to prevent circular dependency
 require_once __DIR__ . '/../utils/database.php';
+
+// Check if the parse_jwt_token function is defined (should be in jwt-core.php)
+if (!function_exists('parse_jwt_token')) {
+    /**
+     * Simplified JWT token parser for when jwt-core.php is not yet loaded
+     * Only extracts the payload for blacklisting purposes
+     * 
+     * @param string $token The JWT token to parse
+     * @return array|false The parsed token with 'header' and 'payload' or false on failure
+     */
+    function parse_jwt_token($token) {
+        try {
+            $parts = explode('.', $token);
+            if (count($parts) != 3) {
+                return false;
+            }
+            
+            $payload = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
+            
+            if (!$payload) {
+                return false;
+            }
+            
+            return [
+                'header' => [],
+                'payload' => $payload
+            ];
+        } catch (Exception $e) {
+            error_log("Failed to parse JWT token: " . $e->getMessage());
+            return false;
+        }
+    }
+}
 
 /**
  * Add a token to the blacklist

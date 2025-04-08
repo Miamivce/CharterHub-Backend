@@ -23,11 +23,13 @@ if (!defined('CHARTERHUB_LOADED')) {
 }
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/../utils/database.php';  // Include the database abstraction layer
 require_once __DIR__ . '/token-blacklist.php';
-require_once __DIR__ . '/../utils/database.php';  // Include the new database abstraction layer
 
-// Always include the Composer autoloader
-require_once __DIR__ . '/../vendor/autoload.php';
+// Always include the Composer autoloader if it exists
+if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
+    require_once __DIR__ . '/../vendor/autoload.php';
+}
 
 // Import Firebase JWT classes
 use \Firebase\JWT\JWT;

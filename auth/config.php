@@ -14,6 +14,10 @@ if (!defined('CHARTERHUB_LOADED')) {
 // Development mode flag - from environment or default to false
 define('DEVELOPMENT_MODE', getenv('DEVELOPMENT_MODE') === 'true' ? true : false);
 
+// Include required dependencies
+// require_once __DIR__ . '/../db-config.php';
+require_once __DIR__ . '/../utils/database.php';
+
 // Database configuration using environment variables
 $db_config = [
     'host' => getenv('DB_HOST') ?: 'mysql-charterhub-charterhub.c.aivencloud.com',
