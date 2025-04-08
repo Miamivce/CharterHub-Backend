@@ -14,7 +14,10 @@ if (!defined('CHARTERHUB_LOADED')) {
 }
 
 // Include auth configuration (which now contains database configuration)
-require_once dirname(__FILE__) . '/../auth/config.php';
+// Check for circular dependency by seeing if $db_config is already defined
+if (!isset($GLOBALS['db_config'])) {
+    require_once dirname(__FILE__) . '/../auth/config.php';
+}
 
 /**
  * Get a database connection using the configuration

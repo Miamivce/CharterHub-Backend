@@ -55,10 +55,27 @@ function get_db_connection_from_config() {
             PDO::ATTR_EMULATE_PREPARES => false
         ];
         
-        // Add SSL mode if required
+        // Add SSL options if required
         if ($db_config['ssl_mode'] === 'REQUIRED') {
-            $options[PDO::MYSQL_ATTR_SSL_CA] = true;
+            error_log("SSL mode is REQUIRED, setting SSL options");
+            // Try to disable SSL verification in production (safer approach for managed DBs)
+            if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+                $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+                error_log("Set MYSQL_ATTR_SSL_VERIFY_SERVER_CERT to false");
+            }
+            
+            // If SSL_CA file path is provided, use it
+            if (getenv('DB_SSL_CA') && file_exists(getenv('DB_SSL_CA'))) {
+                $options[PDO::MYSQL_ATTR_SSL_CA] = getenv('DB_SSL_CA');
+                error_log("Using SSL CA file: " . getenv('DB_SSL_CA'));
+            } else {
+                // Otherwise just enable SSL without verification
+                $options[PDO::MYSQL_ATTR_SSL_CA] = null;
+                error_log("No SSL CA file found, setting MYSQL_ATTR_SSL_CA to null");
+            }
         }
+        
+        error_log("Creating PDO connection with options: " . print_r($options, true));
         
         // Create and return PDO connection
         $pdo = new PDO(

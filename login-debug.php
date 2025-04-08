@@ -1,146 +1,179 @@
 <?php
-// Debug script for client login issues
+/**
+ * CharterHub Login Diagnostics Tool
+ * 
+ * This file helps diagnose issues with the login process
+ * by testing each component separately.
+ */
+
+// Enable error display for debugging
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
-echo "<h1>Login Script Debug</h1>";
-
-// Define CHARTERHUB_LOADED constant to allow included files to run
+// Define a constant to prevent direct access to included files
 define('CHARTERHUB_LOADED', true);
 
-// Add error handling
-function my_error_handler($errno, $errstr, $errfile, $errline) {
-    echo "<div style='color:red;border:1px solid red;padding:5px;margin:5px;'>";
-    echo "<strong>Error:</strong> [$errno] $errstr<br>";
-    echo "Error on line $errline in file $errfile";
-    echo "</div>";
-    return true;
-}
-set_error_handler("my_error_handler");
+header('Content-Type: application/json');
 
-echo "<h2>Testing JWT Library</h2>";
-// Check if Firebase JWT library is available
-$composer_autoload = __DIR__ . '/vendor/autoload.php';
-if (file_exists($composer_autoload)) {
-    require_once $composer_autoload;
-    echo "<p>Composer autoload file exists</p>";
-    
-    if (class_exists('Firebase\JWT\JWT')) {
-        echo "<p style='color:green'>✅ Firebase JWT library is available</p>";
-    } else {
-        echo "<p style='color:red'>❌ Firebase JWT library is NOT available</p>";
-        echo "<p>This is likely causing your login to fail. Install with: <code>composer require firebase/php-jwt</code></p>";
-    }
-} else {
-    echo "<p style='color:red'>❌ Composer autoload file is missing at: $composer_autoload</p>";
-}
-
-echo "<h2>JWT Configuration</h2>";
-// Check JWT configuration
-$auth_config_file = __DIR__ . '/auth/config.php';
-if (file_exists($auth_config_file)) {
-    echo "<p>Auth config file exists at: $auth_config_file</p>";
-    
-    try {
-        // Include the file with error suppression
-        ob_start();
-        require_once $auth_config_file;
-        $output = ob_get_clean();
-        
-        if (!empty($output)) {
-            echo "<p style='color:orange'>⚠️ Warning: Auth config file produced output:</p>";
-            echo "<pre>" . htmlspecialchars($output) . "</pre>";
-        }
-        
-        // Check JWT variables
-        echo "<p>JWT Secret defined: " . (isset($jwt_secret) ? "Yes" : "No") . "</p>";
-        if (isset($jwt_secret)) {
-            echo "<p>JWT Secret length: " . strlen($jwt_secret) . " characters</p>";
-            echo "<p>JWT Secret starts with: " . substr($jwt_secret, 0, 3) . "...</p>";
-        }
-        
-        echo "<p>Auth config array exists: " . (isset($auth_config) ? "Yes" : "No") . "</p>";
-    } catch (Exception $e) {
-        echo "<p style='color:red'>❌ Error loading auth config: " . $e->getMessage() . "</p>";
-    }
-} else {
-    echo "<p style='color:red'>❌ Auth config file is missing at: $auth_config_file</p>";
-}
-
-echo "<h2>Testing Login Script Dependencies</h2>";
-
-// Check required files
-$required_files = [
-    '/auth/global-cors.php',
-    '/auth/config.php',
-    '/auth/jwt-core.php',
-    '/auth/token-blacklist.php',
-    '/utils/database.php'
+// Track progress and errors
+$results = [
+    'status' => 'running',
+    'timestamp' => date('Y-m-d H:i:s'),
+    'tests' => [],
+    'overall_result' => null
 ];
 
-foreach ($required_files as $file) {
-    $path = __DIR__ . $file;
-    if (file_exists($path)) {
-        echo "<p style='color:green'>✅ Found: $file</p>";
-    } else {
-        echo "<p style='color:red'>❌ Missing: $file</p>";
-    }
+function addTestResult($name, $status, $message = null, $details = null) {
+    global $results;
+    $results['tests'][$name] = [
+        'status' => $status,
+        'message' => $message,
+        'details' => $details
+    ];
+    
+    // Output in real-time for easier debugging
+    echo "TEST [{$name}]: {$status}" . ($message ? " - {$message}" : "") . "\n";
+    flush();
 }
 
-echo "<h2>Simulating Login Process</h2>";
-$login_file = __DIR__ . '/auth/client-login.php';
-
-if (file_exists($login_file)) {
-    echo "<p>Login file exists at: $login_file</p>";
+try {
+    // Test 1: Basic PHP functioning
+    addTestResult('php_basic', 'success', 'PHP is working');
     
+    // Test 2: Include database utilities
     try {
-        // Get login file contents 
-        $login_contents = file_get_contents($login_file);
-        $login_size = strlen($login_contents);
-        echo "<p>Login file size: $login_size bytes</p>";
-        
-        // Output first 10 lines to verify it's correct
-        $login_lines = explode("\n", $login_contents);
-        $first_lines = array_slice($login_lines, 0, 10);
-        echo "<p>First few lines of login script:</p>";
-        echo "<pre>" . htmlspecialchars(implode("\n", $first_lines)) . "</pre>";
-        
-        echo "<p>Testing connection to database in login context...</p>";
-        
-        // Include required files (that the login script would use)
-        try {
-            require_once __DIR__ . '/auth/config.php';
-            require_once __DIR__ . '/utils/database.php';
-            
-            // Test getDbConnection function if it exists
-            if (function_exists('getDbConnection')) {
-                try {
-                    $conn = getDbConnection();
-                    echo "<p style='color:green'>✅ Database connection from login context successful!</p>";
-                    
-                    // Test basic query
-                    $stmt = $conn->query("SELECT COUNT(*) as count FROM wp_charterhub_users");
-                    $result = $stmt->fetch(PDO::FETCH_ASSOC);
-                    echo "<p>Number of users: " . $result['count'] . "</p>";
-                } catch (Exception $e) {
-                    echo "<p style='color:red'>❌ Database connection from login context failed: " . $e->getMessage() . "</p>";
-                }
-            } else {
-                echo "<p style='color:red'>❌ getDbConnection function not found!</p>";
-            }
-        } catch (Exception $e) {
-            echo "<p style='color:red'>❌ Error including required files: " . $e->getMessage() . "</p>";
+        require_once __DIR__ . '/utils/database.php';
+        addTestResult('include_database', 'success', 'Database utilities loaded');
+    } catch (Exception $e) {
+        addTestResult('include_database', 'error', 'Failed to load database utilities', $e->getMessage());
+        throw $e;
+    }
+    
+    // Test 3: Include authentication config
+    try {
+        require_once __DIR__ . '/auth/config.php';
+        addTestResult('include_config', 'success', 'Config file loaded');
+    } catch (Exception $e) {
+        addTestResult('include_config', 'error', 'Failed to load config file', $e->getMessage());
+        throw $e;
+    }
+    
+    // Test 4: Check database configuration
+    try {
+        global $db_config;
+        if (!isset($db_config) || !is_array($db_config)) {
+            throw new Exception('Database configuration not found or invalid');
         }
         
+        // Don't include sensitive info in the output
+        $safe_config = $db_config;
+        if (isset($safe_config['password'])) {
+            $safe_config['password'] = '******';
+        }
+        
+        addTestResult('db_config', 'success', 'Database configuration found', $safe_config);
     } catch (Exception $e) {
-        echo "<p style='color:red'>❌ Error accessing login file: " . $e->getMessage() . "</p>";
+        addTestResult('db_config', 'error', 'Database configuration issue', $e->getMessage());
+        throw $e;
     }
-} else {
-    echo "<p style='color:red'>❌ Login file is missing at: $login_file</p>";
+    
+    // Test 5: Database connection
+    try {
+        $pdo = get_db_connection_from_config();
+        addTestResult('db_connection', 'success', 'Database connection established');
+        
+        // Test a simple query
+        $stmt = $pdo->query('SELECT 1 as test');
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($result && isset($result['test']) && $result['test'] == 1) {
+            addTestResult('db_query', 'success', 'Database query successful');
+        } else {
+            throw new Exception('Failed to execute test query');
+        }
+    } catch (Exception $e) {
+        addTestResult('db_connection', 'error', 'Database connection failed', $e->getMessage());
+        throw $e;
+    }
+    
+    // Test 6: Include JWT core file
+    try {
+        require_once __DIR__ . '/auth/jwt-core.php';
+        addTestResult('include_jwt', 'success', 'JWT core file loaded');
+    } catch (Exception $e) {
+        addTestResult('include_jwt', 'error', 'Failed to load JWT core file', $e->getMessage());
+        throw $e;
+    }
+    
+    // Test 7: Check if Firebase JWT classes exist
+    try {
+        if (!class_exists('\\Firebase\\JWT\\JWT')) {
+            throw new Exception('Firebase JWT class not found');
+        }
+        addTestResult('firebase_jwt', 'success', 'Firebase JWT library loaded');
+    } catch (Exception $e) {
+        addTestResult('firebase_jwt', 'error', 'Firebase JWT library issue', $e->getMessage());
+        throw $e;
+    }
+    
+    // Test 8: Try to generate a token
+    try {
+        $test_token = generate_access_token(
+            999, // Test user ID
+            'test@example.com', // Test email
+            'client', // Test role
+            1 // Test token version
+        );
+        
+        if (!$test_token) {
+            throw new Exception('Failed to generate access token');
+        }
+        
+        addTestResult('token_generation', 'success', 'Token generation successful');
+    } catch (Exception $e) {
+        addTestResult('token_generation', 'error', 'Token generation failed', $e->getMessage());
+        throw $e;
+    }
+    
+    // Test 9: Check blacklist functionality
+    try {
+        require_once __DIR__ . '/auth/token-blacklist.php';
+        if (!function_exists('is_token_blacklisted')) {
+            throw new Exception('Blacklist function not found');
+        }
+        addTestResult('blacklist', 'success', 'Token blacklist functionality loaded');
+    } catch (Exception $e) {
+        addTestResult('blacklist', 'error', 'Token blacklist issue', $e->getMessage());
+        throw $e;
+    }
+    
+    // Test 10: Check client-login.php exists and is readable
+    try {
+        $loginFile = __DIR__ . '/auth/client-login.php';
+        if (!file_exists($loginFile)) {
+            throw new Exception('client-login.php file not found');
+        }
+        if (!is_readable($loginFile)) {
+            throw new Exception('client-login.php file not readable');
+        }
+        addTestResult('login_file', 'success', 'Client login file exists and is readable');
+    } catch (Exception $e) {
+        addTestResult('login_file', 'error', 'Client login file issue', $e->getMessage());
+        throw $e;
+    }
+    
+    // All tests passed!
+    $results['status'] = 'completed';
+    $results['overall_result'] = 'success';
+    $results['message'] = 'All diagnostic tests passed successfully';
+    
+} catch (Exception $e) {
+    // Handle any uncaught exceptions
+    $results['status'] = 'completed';
+    $results['overall_result'] = 'error';
+    $results['message'] = 'Diagnostic tests failed: ' . $e->getMessage();
 }
 
-echo "<h2>Environment Settings</h2>";
-echo "<p>PHP Version: " . phpversion() . "</p>";
-echo "<p>PDO MySQL Extension: " . (extension_loaded('pdo_mysql') ? "Enabled" : "Disabled") . "</p>";
-echo "<p>Server: " . $_SERVER['SERVER_SOFTWARE'] . "</p>";
+// Output full results as JSON
+header('Content-Type: application/json');
+echo json_encode($results, JSON_PRETTY_PRINT);
 ?>
