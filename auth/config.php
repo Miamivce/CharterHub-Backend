@@ -14,8 +14,63 @@ if (!defined('CHARTERHUB_LOADED')) {
 // Development mode flag - from environment or default to false
 define('DEVELOPMENT_MODE', getenv('DEVELOPMENT_MODE') === 'true' ? true : false);
 
-// Include required dependencies
-require_once __DIR__ . '/../db-config.php';
+// Database configuration using environment variables
+$db_config = [
+    'host' => getenv('DB_HOST') ?: 'mysql-charterhub-charterhub.c.aivencloud.com',
+    'port' => getenv('DB_PORT') ?: '19174',
+    'dbname' => getenv('DB_NAME') ?: 'defaultdb',
+    'username' => getenv('DB_USER') ?: 'avnadmin',
+    'password' => getenv('DB_PASSWORD') ?: 'AVNS_HCZbm5bZJE1L9C8Pz8C',
+    'charset' => getenv('DB_CHARSET') ?: 'utf8mb4',
+    'ssl_mode' => getenv('DB_SSL_MODE') ?: 'REQUIRED'
+];
+
+/**
+ * Get a PDO database connection using the configuration
+ * 
+ * @return PDO A database connection
+ * @throws PDOException If connection fails
+ */
+function get_db_connection_from_config() {
+    global $db_config;
+    
+    try {
+        // Create DSN string with SSL requirements
+        $dsn = sprintf(
+            'mysql:host=%s;port=%s;dbname=%s;charset=%s',
+            $db_config['host'],
+            $db_config['port'],
+            $db_config['dbname'],
+            $db_config['charset']
+        );
+        
+        // PDO options
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false
+        ];
+        
+        // Add SSL mode if required
+        if ($db_config['ssl_mode'] === 'REQUIRED') {
+            $options[PDO::MYSQL_ATTR_SSL_CA] = true;
+        }
+        
+        // Create and return PDO connection
+        $pdo = new PDO(
+            $dsn,
+            $db_config['username'],
+            $db_config['password'],
+            $options
+        );
+        
+        return $pdo;
+    } catch (PDOException $e) {
+        // Log the error but don't expose credentials
+        error_log('Database connection error: ' . $e->getMessage());
+        throw new PDOException('Database connection failed: ' . $e->getMessage());
+    }
+}
 
 // Authentication settings
 $auth_config = [

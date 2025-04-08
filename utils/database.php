@@ -13,8 +13,8 @@ if (!defined('CHARTERHUB_LOADED')) {
     define('CHARTERHUB_LOADED', true);
 }
 
-// Include database configuration
-require_once dirname(__FILE__) . '/../db-config.php';
+// Include auth configuration (which now contains database configuration)
+require_once dirname(__FILE__) . '/../auth/config.php';
 
 /**
  * Get a database connection using the configuration
