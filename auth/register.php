@@ -17,9 +17,9 @@ set_time_limit(90); // Set to 90 seconds
 
 // Include configuration and CORS handling
 require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/../db-config.php';
 require_once __DIR__ . '/global-cors.php';
 require_once __DIR__ . '/../utils/database.php';  // Include the database abstraction layer
+require_once __DIR__ . '/jwt-core.php';
 // Apply CORS headers explicitly
 apply_global_cors(['POST', 'OPTIONS']);
 
