@@ -6,6 +6,10 @@
  * It extends the standard login.php by adding a role check.
  */
 
+// Set error display settings (ADDED)
+ini_set('display_errors', 0);
+error_reporting(E_ERROR);
+
 // Define a constant to prevent direct access to included files
 define('CHARTERHUB_LOADED', true);
 
@@ -19,6 +23,7 @@ require_once dirname(__FILE__) . '/jwt-core.php';
 require_once dirname(__FILE__) . '/token-blacklist.php';
 require_once dirname(__FILE__) . '/../utils/database.php';  // Include the database abstraction layer
 
+// Set content-type early to ensure it's applied even if errors occur
 header('Content-Type: application/json');
 
 // Define helper functions
@@ -99,9 +104,6 @@ try {
         error_response('Invalid credentials', 401, 'invalid_credentials');
     }
     
-    // Add debug logging for troubleshooting
-    error_log("Admin login attempt for user: {$email}, ID: {$user['id']}, Role: {$user['role']}, Verified: {$user['verified']}");
-    
     // ADMIN ONLY: Check if user has admin role
     if ($user['role'] !== 'admin') {
         log_auth_action('admin_login_failed', $user['id'], 'Non-admin user attempted admin login', [
@@ -116,7 +118,7 @@ try {
     // Check if user is verified
     if (!$user['verified']) {
         log_auth_action('admin_login_failed', $user['id'], 'Account not verified', ['email' => $email]);
-        error_response('Your admin account needs to be verified. Please contact an existing administrator.', 401, 'account_not_verified');
+        error_response('Account not verified. Please check your email for verification instructions.', 401, 'account_not_verified');
     }
     
     // Verify password
@@ -124,9 +126,6 @@ try {
         log_auth_action('admin_login_failed', $user['id'], 'Invalid password', ['email' => $email]);
         error_response('Invalid credentials', 401, 'invalid_credentials');
     }
-    
-    // Log successful password verification
-    error_log("Password verification successful for admin: {$email}");
     
     // If email case is different than what's stored but same when normalized, update the stored email
     if (strtolower(trim($user['email'])) === strtolower(trim($email)) && $user['email'] !== $email) {

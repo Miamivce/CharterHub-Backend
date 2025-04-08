@@ -38,9 +38,8 @@ function send_json_response($data, $status_code = 200) {
 
 // Function to apply CORS headers with allowed methods
 function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
-    // Read allowed origins from environment variable
+    // Get allowed origins from environment variable or use defaults
     $env_origins = getenv('CORS_ALLOWED_ORIGINS');
-    error_log("CORS environment variable: " . $env_origins);
     $env_origins_array = $env_origins ? explode(',', $env_origins) : [];
     
     // Default allowed origins
@@ -55,28 +54,24 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
         'http://127.0.0.1:8080',
         'https://charterhub.yachtstory.com',
         'https://staging-charterhub.yachtstory.com',
-        'https://charter-hub.vercel.app',
-        'https://admin.yachtstory.be',
-        'https://app.yachtstory.be'
+        'https://charter-p2f5lp7ws-maurits-s-projects.vercel.app',
+        'https://charter-hub.vercel.app'
     ];
+
+    // Combine environment origins with default origins
+    $allowed_origins = array_merge($default_origins, $env_origins_array);
     
-    // Combine environment origins with default origins and remove duplicates
-    $allowed_origins = array_unique(array_merge($default_origins, $env_origins_array));
-    
-    // Debug - Log all configured origins
+    // Debug - Log all allowed origins
     error_log("CORS allowed origins: " . implode(', ', $allowed_origins));
-    
+
     $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
 
-    // Debug - Log the request origin
+    // Debug - Log the origin
     error_log("CORS request from origin: " . $origin);
 
     // Check if origin is allowed or if we're in development mode
     $isDev = strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false;
     $isAllowed = in_array($origin, $allowed_origins);
-
-    error_log("CORS origin allowed: " . ($isAllowed ? 'yes' : 'no'));
-    error_log("CORS isDev: " . ($isDev ? 'yes' : 'no'));
 
     // Set CORS headers based on origin
     if ($isAllowed || $isDev) {
@@ -100,7 +95,16 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
         }
     } else {
         if (isset($_SERVER['HTTP_ORIGIN'])) {
-            error_log("CORS request from disallowed origin: " . $_SERVER['HTTP_ORIGIN'] . " - Make sure to add it to CORS_ALLOWED_ORIGINS environment variable or defaults.");
+            error_log("CORS request from disallowed origin: " . $_SERVER['HTTP_ORIGIN']);
+            // Return a proper JSON error for disallowed origins
+            header('Content-Type: application/json');
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'message' => 'CORS policy: Origin not allowed',
+                'code' => 'cors_origin_denied'
+            ]);
+            exit;
         }
     }
 }

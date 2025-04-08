@@ -6,6 +6,10 @@
  * It extends the standard login.php by adding a role check.
  */
 
+// Set error display settings (ADDED)
+ini_set('display_errors', 0);
+error_reporting(E_ERROR);
+
 // Define a constant to prevent direct access to included files
 define('CHARTERHUB_LOADED', true);
 
@@ -19,6 +23,7 @@ require_once dirname(__FILE__) . '/jwt-core.php';
 require_once dirname(__FILE__) . '/token-blacklist.php';
 require_once dirname(__FILE__) . '/../utils/database.php';  // Include the database abstraction layer
 
+// Set content-type early to ensure it's applied even if errors occur (MOVED UP)
 header('Content-Type: application/json');
 
 // Define helper functions
@@ -207,4 +212,5 @@ try {
 } catch (Exception $e) {
     log_auth_action('client_login_error', 0, 'Client login error: ' . $e->getMessage());
     error_response('Authentication error. Please try again later.', 500, 'server_error');
-} 
+}
+?> 
