@@ -314,6 +314,15 @@ try {
         // Removing verification token as the column doesn't exist
         error_log("REGISTER.PHP: Skipping verification token generation since column doesn't exist");
         
+        // Generate a unique wp_user_id (starting from 500)
+        $result = fetchColumn(
+            "SELECT MAX(wp_user_id) FROM {$db_config['table_prefix']}charterhub_users",
+            []
+        );
+        $max_wp_user_id = intval($result);
+        $new_wp_user_id = max(500, $max_wp_user_id + 1);
+        error_log("REGISTER.PHP: Generated new wp_user_id: " . $new_wp_user_id);
+        
         // DEBUG: Show the SQL that will be executed - removed verification_token
         $sql = "
             INSERT INTO {$db_config['table_prefix']}charterhub_users 
@@ -321,7 +330,7 @@ try {
             phone_number, company, country, address, notes, role, verified, token_version,
             wp_user_id, created_at, updated_at) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'client', 1, 0,
-            0, NOW(), NOW())
+            ?, NOW(), NOW())
         ";
         error_log("REGISTER.PHP: About to execute SQL: " . $sql);
         error_log("REGISTER.PHP: With parameters: " . json_encode([
@@ -363,7 +372,8 @@ try {
             $company,
             $country,
             $address,
-            $notes
+            $notes,
+            $new_wp_user_id // Use the generated wp_user_id
         ]);
         
         // Log the phone number value for debugging
