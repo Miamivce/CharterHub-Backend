@@ -60,6 +60,7 @@ if (!empty($missing_fields)) {
     ], 400);
 }
 
+// Remove the duplicate function definitions since they're already in database.php
 // Setup database connection functions if they're not already defined
 if (!function_exists('get_db_connection')) {
     function get_db_connection() {
@@ -89,36 +90,6 @@ try {
     error_log("REGISTER.PHP: Error connecting to database: " . $e->getMessage());
     send_json_response(['success' => false, 'error' => 'database_error', 'message' => 'Database connection failed'], 500);
     exit;
-}
-
-// Simple DB helper functions for this file
-function executeInsert($sql, $params = []) {
-    global $pdo;
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        return $pdo->lastInsertId();
-    } catch (PDOException $e) {
-        error_log("REGISTER.PHP: Database insert error: " . $e->getMessage());
-        throw $e;
-    }
-}
-
-function executeUpdate($sql, $params = []) {
-    global $pdo;
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->rowCount();
-    } catch (PDOException $e) {
-        error_log("REGISTER.PHP: Database update error: " . $e->getMessage());
-        throw $e;
-    }
-}
-
-function lastInsertId() {
-    global $pdo;
-    return $pdo->lastInsertId();
 }
 
 // Check if this is an invited registration
