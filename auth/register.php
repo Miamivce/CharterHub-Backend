@@ -306,22 +306,7 @@ try {
     error_log("REGISTER.PHP: Started database transaction");
     
     try {
-        // Generate a username based on first and last name
-        $username = preg_replace('/[^a-z0-9]/', '', strtolower($data['firstName'] . $data['lastName']));
-        if (empty($username)) {
-            $username = 'user' . rand(1000, 9999);
-        }
-        
-        // Check if username already exists
-        $existing_username = fetchRow(
-            "SELECT id FROM {$db_config['table_prefix']}charterhub_users WHERE username = ?",
-            [$username]
-        );
-        
-        if ($existing_username) {
-            // If username exists, append a random number
-            $username .= rand(1000, 9999);
-        }
+        error_log("REGISTER.PHP: Starting normal registration process");
         
         // Hash the password
         $hashed_password = password_hash($data['password'], PASSWORD_DEFAULT);
@@ -330,19 +315,18 @@ try {
         $verification_token = bin2hex(random_bytes(32));
         error_log("REGISTER.PHP: Generated verification token for " . $data['email']);
         
-        // DEBUG: Show the SQL that will be executed
+        // DEBUG: Show the SQL that will be executed - removed username column
         $sql = "
             INSERT INTO {$db_config['table_prefix']}charterhub_users 
-            (email, username, password, first_name, last_name, display_name, 
+            (email, password, first_name, last_name, display_name, 
             phone_number, company, role, verified, verification_token, 
             created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'client', 0, ?, 
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 0, ?, 
             NOW(), NOW())
         ";
         error_log("REGISTER.PHP: About to execute SQL: " . $sql);
         error_log("REGISTER.PHP: With parameters: " . json_encode([
             strtolower($data['email']),
-            $username,
             '[HASHED PASSWORD]',
             $data['firstName'],
             $data['lastName'],
@@ -359,18 +343,20 @@ try {
         } elseif (isset($data['phone_number']) && !empty($data['phone_number'])) {
             $phone_number = $data['phone_number'];
         }
-        error_log("REGISTER.PHP: Normalized phone number: " . ($phone_number ?? 'NULL'));
+        error_log("REGISTER.PHP: (INSERT) Normalized phone number: " . ($phone_number ?? 'NULL'));
+        
+        // Get the company name if provided
+        $company = isset($data['company']) ? $data['company'] : null;
         
         // Insert new user using the database abstraction layer
         executeUpdate($sql, [
             strtolower($data['email']),
-            $username,
             $hashed_password,
             $data['firstName'],
             $data['lastName'],
             $data['firstName'] . ' ' . $data['lastName'],
             $phone_number, // Use the normalized phone number
-            isset($data['company']) ? $data['company'] : null,
+            $company,
             $verification_token
         ]);
         
@@ -395,7 +381,6 @@ try {
                     'email' => $data['email'],
                     'firstName' => $data['firstName'],
                     'lastName' => $data['lastName'],
-                    'username' => $username
                 ])
             ]
         );
