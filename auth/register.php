@@ -314,6 +314,10 @@ try {
         // Removing verification token as the column doesn't exist
         error_log("REGISTER.PHP: Skipping verification token generation since column doesn't exist");
         
+        // Generate a verification token anyway for response (even though we don't store it in DB)
+        $verification_token = bin2hex(random_bytes(32));
+        error_log("REGISTER.PHP: Generated token for response only: " . substr($verification_token, 0, 8) . "...");
+        
         // Generate a unique wp_user_id (starting from 500)
         $result = fetchColumn(
             "SELECT MAX(wp_user_id) FROM {$db_config['table_prefix']}charterhub_users",
