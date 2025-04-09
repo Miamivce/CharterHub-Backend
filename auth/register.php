@@ -318,9 +318,9 @@ try {
         $sql = "
             INSERT INTO {$db_config['table_prefix']}charterhub_users 
             (email, password, first_name, last_name, display_name, 
-            phone_number, company, country, address, notes, role, verified, token_version,
+            phone_number, company, role, verified, token_version,
             created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'client', 1, 0,
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 1, 0,
             NOW(), NOW())
         ";
         error_log("REGISTER.PHP: About to execute SQL: " . $sql);
@@ -331,10 +331,7 @@ try {
             $data['lastName'],
             $data['firstName'] . ' ' . $data['lastName'],
             isset($data['phoneNumber']) ? $data['phoneNumber'] : null,
-            isset($data['company']) ? $data['company'] : null,
-            isset($data['country']) ? $data['country'] : null,
-            isset($data['address']) ? $data['address'] : null,
-            isset($data['notes']) ? $data['notes'] : null
+            isset($data['company']) ? $data['company'] : null
         ]));
         
         // Normalize phone number field - handle both phoneNumber and phone_number
@@ -348,9 +345,6 @@ try {
         
         // Get the company name if provided
         $company = isset($data['company']) ? $data['company'] : null;
-        $country = isset($data['country']) ? $data['country'] : null;
-        $address = isset($data['address']) ? $data['address'] : null;
-        $notes = isset($data['notes']) ? $data['notes'] : null;
         
         // Insert new user using the database abstraction layer
         executeUpdate($sql, [
@@ -360,10 +354,7 @@ try {
             $data['lastName'],
             $data['firstName'] . ' ' . $data['lastName'],
             $phone_number, // Use the normalized phone number
-            $company,
-            $country,
-            $address,
-            $notes
+            $company
         ]);
         
         // Log the phone number value for debugging
