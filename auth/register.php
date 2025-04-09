@@ -60,6 +60,67 @@ if (!empty($missing_fields)) {
     ], 400);
 }
 
+// Setup database connection functions if they're not already defined
+if (!function_exists('get_db_connection')) {
+    function get_db_connection() {
+        global $db_config;
+        
+        try {
+            $dsn = "mysql:host={$db_config['host']};dbname={$db_config['name']};charset=utf8mb4";
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+            ];
+            return new PDO($dsn, $db_config['user'], $db_config['pass'], $options);
+        } catch (PDOException $e) {
+            error_log("REGISTER.PHP: Database connection error: " . $e->getMessage());
+            send_json_response(['success' => false, 'error' => 'database_error', 'message' => 'Could not connect to database'], 500);
+            exit;
+        }
+    }
+}
+
+// Get database connection
+try {
+    $pdo = get_db_connection();
+    error_log("REGISTER.PHP: Connected to database successfully");
+} catch (Exception $e) {
+    error_log("REGISTER.PHP: Error connecting to database: " . $e->getMessage());
+    send_json_response(['success' => false, 'error' => 'database_error', 'message' => 'Database connection failed'], 500);
+    exit;
+}
+
+// Simple DB helper functions for this file
+function executeInsert($sql, $params = []) {
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $pdo->lastInsertId();
+    } catch (PDOException $e) {
+        error_log("REGISTER.PHP: Database insert error: " . $e->getMessage());
+        throw $e;
+    }
+}
+
+function executeUpdate($sql, $params = []) {
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->rowCount();
+    } catch (PDOException $e) {
+        error_log("REGISTER.PHP: Database update error: " . $e->getMessage());
+        throw $e;
+    }
+}
+
+function lastInsertId() {
+    global $pdo;
+    return $pdo->lastInsertId();
+}
+
 // Check if this is an invited registration
 $isInvited = isset($data['isInvited']) && $data['isInvited'] === true;
 $clientId = isset($data['clientId']) ? intval($data['clientId']) : null;
@@ -77,10 +138,9 @@ if ($isInvited) {
         error_log("REGISTER.PHP: Invitation token provided: " . substr($invitationToken, 0, 8) . "...");
         
         // Verify the invitation token exists and is valid
-        $invitation = fetchRow(
-            "SELECT * FROM {$db_config['table_prefix']}charterhub_invitations WHERE token = ? AND used = 0",
-            [$invitationToken]
-        );
+        $stmt = $pdo->prepare("SELECT * FROM wp_charterhub_invitations WHERE token = ? AND used = 0");
+        $stmt->execute([$invitationToken]);
+        $invitation = $stmt->fetch();
         
         if (!$invitation) {
             error_log("REGISTER.PHP: Invalid or already used invitation token: " . substr($invitationToken, 0, 8) . "...");
@@ -104,10 +164,9 @@ try {
     error_log("REGISTER.PHP: Attempting database operations");
     
     // For ALL registration types, check if email exists
-    $existing_email_user = fetchRow(
-        "SELECT id FROM {$db_config['table_prefix']}charterhub_users WHERE email = ?",
-        [strtolower($data['email'])]
-    );
+    $stmt = $pdo->prepare("SELECT id FROM wp_charterhub_users WHERE email = ?");
+    $stmt->execute([strtolower($data['email'])]);
+    $existing_email_user = $stmt->fetch();
     
     // For normal registrations, any existing email is an error
     if ($existing_email_user && !$isInvited) {
@@ -143,7 +202,7 @@ try {
         
         try {
             $existingCustomer = fetchRow(
-                "SELECT * FROM {$db_config['table_prefix']}charterhub_users WHERE id = ?",
+                "SELECT * FROM wp_charterhub_users WHERE id = ?",
                 [$clientId]
             );
             error_log("REGISTER.PHP: Looked up customer in main table: " . ($existingCustomer ? "Found" : "Not found"));
@@ -155,7 +214,7 @@ try {
         if (!$existingCustomer) {
             try {
                 $existingCustomer = fetchRow(
-                    "SELECT * FROM {$db_config['table_prefix']}users WHERE ID = ?",
+                    "SELECT * FROM wp_users WHERE ID = ?",
                     [$clientId]
                 );
                 error_log("REGISTER.PHP: Looked up customer in legacy table: " . ($existingCustomer ? "Found" : "Not found"));
@@ -187,7 +246,7 @@ try {
                 
                 // Update the existing customer record
                 executeUpdate(
-                    "UPDATE {$db_config['table_prefix']}charterhub_users 
+                    "UPDATE wp_charterhub_users 
                     SET password = ?, first_name = ?, last_name = ?, display_name = ?, 
                     phone_number = ?, company = ?, verified = 0, verification_token = ?, 
                     email = ?, updated_at = NOW()
@@ -209,7 +268,7 @@ try {
                 
                 // Log the update action
                 executeUpdate(
-                    "INSERT INTO {$db_config['table_prefix']}charterhub_auth_logs 
+                    "INSERT INTO wp_charterhub_auth_logs 
                     (user_id, action, status, ip_address, user_agent, details) 
                     VALUES (?, 'invited_registration_update', 'success', ?, ?, ?)",
                     [
@@ -229,7 +288,7 @@ try {
                 try {
                     // Find any active invitations for this client
                     $invitation = fetchRow(
-                        "SELECT id FROM {$db_config['table_prefix']}charterhub_invitations 
+                        "SELECT id FROM wp_charterhub_invitations 
                          WHERE email = ? AND used = 0 AND expires_at > NOW()",
                         [strtolower($data['email'])]
                     );
@@ -237,7 +296,7 @@ try {
                     // If found, mark as used
                     if ($invitation && isset($invitation['id'])) {
                         executeUpdate(
-                            "UPDATE {$db_config['table_prefix']}charterhub_invitations 
+                            "UPDATE wp_charterhub_invitations 
                              SET used = 1, used_at = NOW() 
                              WHERE id = ?",
                             [$invitation['id']]
@@ -319,17 +378,28 @@ try {
         error_log("REGISTER.PHP: Generated token for response only: " . substr($verification_token, 0, 8) . "...");
         
         // Generate a unique wp_user_id (starting from 500)
-        $result = fetchColumn(
-            "SELECT MAX(wp_user_id) FROM {$db_config['table_prefix']}charterhub_users",
-            []
-        );
-        $max_wp_user_id = intval($result);
-        $new_wp_user_id = max(500, $max_wp_user_id + 1);
-        error_log("REGISTER.PHP: Generated new wp_user_id: " . $new_wp_user_id);
+        try {
+            // Get the max wp_user_id using direct PDO query instead of fetchColumn
+            $stmt = $pdo->query("SELECT MAX(wp_user_id) FROM wp_charterhub_users");
+            $max_wp_user_id = 0;
+            if ($stmt) {
+                $result = $stmt->fetch(PDO::FETCH_NUM);
+                if ($result && isset($result[0])) {
+                    $max_wp_user_id = intval($result[0]);
+                }
+            }
+            $new_wp_user_id = max(500, $max_wp_user_id + 1);
+            error_log("REGISTER.PHP: Generated new wp_user_id: " . $new_wp_user_id);
+        } catch (Exception $e) {
+            // If there's any error, fall back to a timestamp-based ID
+            error_log("REGISTER.PHP: Error getting max ID: " . $e->getMessage());
+            $new_wp_user_id = 500 + (time() % 10000); // Use time-based ID as fallback
+            error_log("REGISTER.PHP: Using fallback timestamp-based ID: " . $new_wp_user_id);
+        }
         
         // DEBUG: Show the SQL that will be executed - removed verification_token
         $sql = "
-            INSERT INTO {$db_config['table_prefix']}charterhub_users 
+            INSERT INTO wp_charterhub_users 
             (email, password, first_name, last_name, display_name, 
             phone_number, company, country, address, notes, role, verified, token_version,
             wp_user_id, created_at, updated_at) 
@@ -390,7 +460,7 @@ try {
         
         // Log registration with full action name - UPDATED to use wp_charterhub_auth_logs
         executeUpdate(
-            "INSERT INTO {$db_config['table_prefix']}charterhub_auth_logs 
+            "INSERT INTO wp_charterhub_auth_logs 
             (user_id, action, status, ip_address, user_agent, details) 
             VALUES (?, 'register', 'success', ?, ?, ?)",
             [
@@ -414,7 +484,7 @@ try {
                 
                 // Update the invitation record
                 $updateResult = executeUpdate(
-                    "UPDATE {$db_config['table_prefix']}charterhub_invitations 
+                    "UPDATE wp_charterhub_invitations 
                      SET used = 1, used_at = NOW(), used_by_user_id = ? 
                      WHERE token = ? AND used = 0",
                     [$user_id, $invitationToken]
@@ -445,7 +515,7 @@ try {
                 
                 // First try to update the customer record in charterhub_customers table
                 $customerUpdateCount = executeUpdate(
-                    "UPDATE {$db_config['table_prefix']}charterhub_customers 
+                    "UPDATE wp_charterhub_customers 
                     SET user_id = ?, updated_at = NOW(), status = 'active'
                     WHERE id = ?",
                     [$user_id, $clientId]
@@ -460,7 +530,7 @@ try {
                     
                     // Check if the client record exists in wp_charterhub_users
                     $clientRecord = fetchRow(
-                        "SELECT id, role FROM {$db_config['table_prefix']}charterhub_users WHERE id = ?",
+                        "SELECT id, role FROM wp_charterhub_users WHERE id = ?",
                         [$clientId]
                     );
                     
@@ -476,7 +546,7 @@ try {
                             "SELECT COUNT(*) 
                             FROM information_schema.tables 
                             WHERE table_schema = DATABASE() 
-                            AND table_name = '{$db_config['table_prefix']}charterhub_user_links'",
+                            AND table_name = 'wp_charterhub_user_links'",
                             []
                         );
                         
@@ -484,7 +554,7 @@ try {
                             error_log("REGISTER.PHP: Creating charterhub_user_links table");
                             
                             executeUpdate("
-                                CREATE TABLE IF NOT EXISTS {$db_config['table_prefix']}charterhub_user_links (
+                                CREATE TABLE IF NOT EXISTS wp_charterhub_user_links (
                                     id INT AUTO_INCREMENT PRIMARY KEY,
                                     user_id INT NOT NULL,
                                     linked_user_id INT NOT NULL,
@@ -498,7 +568,7 @@ try {
                         
                         // Add a link record in a metadata table 
                         executeUpdate(
-                            "INSERT INTO {$db_config['table_prefix']}charterhub_user_links 
+                            "INSERT INTO wp_charterhub_user_links 
                             (user_id, linked_user_id, link_type, created_at) 
                             VALUES (?, ?, 'invited_registration', NOW())",
                             [$user_id, $clientId]
