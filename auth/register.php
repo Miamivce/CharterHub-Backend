@@ -311,17 +311,16 @@ try {
         // Hash the password
         $hashed_password = password_hash($data['password'], PASSWORD_DEFAULT);
         
-        // Generate verification token
-        $verification_token = bin2hex(random_bytes(32));
-        error_log("REGISTER.PHP: Generated verification token for " . $data['email']);
+        // Removing verification token as the column doesn't exist
+        error_log("REGISTER.PHP: Skipping verification token generation since column doesn't exist");
         
-        // DEBUG: Show the SQL that will be executed - removed username column
+        // DEBUG: Show the SQL that will be executed - removed verification_token
         $sql = "
             INSERT INTO {$db_config['table_prefix']}charterhub_users 
             (email, password, first_name, last_name, display_name, 
-            phone_number, company, role, verified, verification_token, 
+            phone_number, company, role, verified, 
             created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 0, ?, 
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 1, 
             NOW(), NOW())
         ";
         error_log("REGISTER.PHP: About to execute SQL: " . $sql);
@@ -332,8 +331,7 @@ try {
             $data['lastName'],
             $data['firstName'] . ' ' . $data['lastName'],
             isset($data['phoneNumber']) ? $data['phoneNumber'] : null,
-            isset($data['company']) ? $data['company'] : null,
-            $verification_token
+            isset($data['company']) ? $data['company'] : null
         ]));
         
         // Normalize phone number field - handle both phoneNumber and phone_number
@@ -357,7 +355,6 @@ try {
             $data['firstName'] . ' ' . $data['lastName'],
             $phone_number, // Use the normalized phone number
             $company,
-            $verification_token
         ]);
         
         // Log the phone number value for debugging
