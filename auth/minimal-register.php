@@ -113,6 +113,18 @@ try {
     }
     $new_wp_user_id = max(500, $max_wp_user_id + 1);
     
+    // Generate a unique ID for the user (starting from 500)
+    $stmt = $pdo->query("SELECT MAX(id) FROM wp_charterhub_users");
+    $max_id = 0;
+    if ($stmt) {
+        $result = $stmt->fetch(PDO::FETCH_NUM);
+        if ($result && isset($result[0])) {
+            $max_id = intval($result[0]);
+        }
+    }
+    $new_id = max(500, $max_id + 1);
+    error_log("MINIMAL-REGISTER.PHP: Generated new id: " . $new_id);
+    
     // Use company name if provided
     $company = isset($data['company']) ? $data['company'] : null;
     
@@ -124,15 +136,16 @@ try {
         $phone_number = $data['phone_number'];
     }
     
-    // Since verification_token column doesn't exist, we'll set verified = 1 directly
+    // Include id field explicitly in the SQL statement
     $sql = "INSERT INTO wp_charterhub_users 
-            (email, password, first_name, last_name, display_name, 
+            (id, email, password, first_name, last_name, display_name, 
             phone_number, company, role, verified, token_version,
             wp_user_id, created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 1, 0, ?, NOW(), NOW())";
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'client', 1, 0, ?, NOW(), NOW())";
     
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
+        $new_id,
         strtolower($data['email']),
         $hashed_password,
         $data['firstName'],
