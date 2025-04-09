@@ -40,6 +40,10 @@ function getDbConnection() {
             // Test the connection
             $connection->query("SELECT 1");
             error_log("Database connection created successfully");
+            
+            // Ensure database views exist for cross-prefix compatibility
+            ensureDatabaseViewsCompat($connection);
+            
         } catch (PDOException $e) {
             error_log("PDO Exception in getDbConnection: " . $e->getMessage());
             // Re-throw to be handled by caller
@@ -51,6 +55,53 @@ function getDbConnection() {
     }
     
     return $connection;
+}
+
+/**
+ * Ensure database views exist for compatibility between prefixed and non-prefixed tables
+ *
+ * @param PDO $connection The database connection
+ * @return bool True if successful, false otherwise
+ */
+function ensureDatabaseViewsCompat($connection) {
+    try {
+        // First check if the ensure-views.php file exists and include it
+        $viewsFile = dirname(__FILE__) . '/ensure-views.php';
+        if (file_exists($viewsFile)) {
+            require_once $viewsFile;
+            if (function_exists('ensureDatabaseViews')) {
+                return ensureDatabaseViews($connection);
+            }
+        }
+        
+        // Fallback implementation if ensure-views.php doesn't exist or function not available
+        error_log("Using fallback view creation");
+        global $db_config;
+        $prefix = isset($db_config['table_prefix']) ? $db_config['table_prefix'] : 'wp_';
+        
+        // Core tables to ensure views for
+        $tables = [
+            $prefix . 'charterhub_users' => 'charterhub_users'
+        ];
+        
+        foreach ($tables as $source => $view) {
+            if ($source === $view) continue; // Skip if they're the same
+            
+            // Check if source table exists
+            $stmt = $connection->query("SHOW TABLES LIKE '$source'");
+            if ($stmt && $stmt->rowCount() > 0) {
+                // Create view to the source table
+                $connection->exec("CREATE OR REPLACE VIEW `$view` AS SELECT * FROM `$source`");
+                error_log("Created view $view -> $source");
+            }
+        }
+        
+        return true;
+    } catch (Exception $e) {
+        error_log("Error ensuring database views: " . $e->getMessage());
+        // Don't throw here, just return false as this is a convenience function
+        return false;
+    }
 }
 
 /**
