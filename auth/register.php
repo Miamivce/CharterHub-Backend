@@ -319,9 +319,9 @@ try {
             INSERT INTO {$db_config['table_prefix']}charterhub_users 
             (email, password, first_name, last_name, display_name, 
             phone_number, company, country, address, notes, role, verified, token_version,
-            created_at, updated_at) 
+            wp_user_id, created_at, updated_at) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'client', 1, 0,
-            NOW(), NOW())
+            0, NOW(), NOW())
         ";
         error_log("REGISTER.PHP: About to execute SQL: " . $sql);
         error_log("REGISTER.PHP: With parameters: " . json_encode([
