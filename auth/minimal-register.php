@@ -100,6 +100,19 @@ try {
     }
     $new_wp_user_id = max(500, $max_wp_user_id + 1);
     
+    // Generate a unique ID for the user (starting from 500)
+    // Since AUTO_INCREMENT isn't working, we need to explicitly set the ID
+    $stmt = $pdo->query("SELECT MAX(id) FROM wp_charterhub_users");
+    $max_id = 0;
+    if ($stmt) {
+        $result = $stmt->fetch(PDO::FETCH_NUM);
+        if ($result && isset($result[0]) && !is_null($result[0])) {
+            $max_id = intval($result[0]);
+        }
+    }
+    $new_id = max(500, $max_id + 1);
+    error_log("MINIMAL-REGISTER.PHP: Generated new id: " . $new_id);
+    
     // Use company name if provided
     $company = isset($data['company']) ? $data['company'] : null;
     
@@ -111,15 +124,16 @@ try {
         $phone_number = $data['phone_number'];
     }
     
-    // Let MySQL handle the ID with AUTO_INCREMENT
+    // Include the id field explicitly since AUTO_INCREMENT isn't working
     $sql = "INSERT INTO wp_charterhub_users 
-            (email, password, first_name, last_name, display_name, 
+            (id, email, password, first_name, last_name, display_name, 
             phone_number, company, role, verified, token_version,
             wp_user_id, created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 1, 0, ?, NOW(), NOW())";
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'client', 1, 0, ?, NOW(), NOW())";
     
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
+        $new_id,
         strtolower($data['email']),
         $hashed_password,
         $data['firstName'],
@@ -130,8 +144,8 @@ try {
         $new_wp_user_id
     ]);
     
-    // Get the auto-generated ID
-    $user_id = $pdo->lastInsertId();
+    // Use our manually generated ID instead of lastInsertId()
+    $user_id = $new_id;
     error_log("MINIMAL-REGISTER.PHP: New user inserted with ID: " . $user_id);
     
     // Return success response
