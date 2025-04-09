@@ -311,18 +311,20 @@ try {
         // Hash the password
         $hashed_password = password_hash($data['password'], PASSWORD_DEFAULT);
         
-        // Removing verification token as the column doesn't exist
-        error_log("REGISTER.PHP: Skipping verification token generation since column doesn't exist");
+        // Generate verification token and set verified=1 directly (skipping verification)
+        // $verification_token = bin2hex(random_bytes(32));
+        // error_log("REGISTER.PHP: Generated verification token for " . $data['email']);
         
-        // DEBUG: Show the SQL that will be executed - removed verification_token
+        // DEBUG: Show the SQL that will be executed
         $sql = "
             INSERT INTO {$db_config['table_prefix']}charterhub_users 
             (email, password, first_name, last_name, display_name, 
-            phone_number, company, role, verified, 
+            phone_number, company, role, verified, country, address, notes,
             created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 1, 
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 1, ?, ?, ?,
             NOW(), NOW())
         ";
+        
         error_log("REGISTER.PHP: About to execute SQL: " . $sql);
         error_log("REGISTER.PHP: With parameters: " . json_encode([
             strtolower($data['email']),
@@ -331,7 +333,10 @@ try {
             $data['lastName'],
             $data['firstName'] . ' ' . $data['lastName'],
             isset($data['phoneNumber']) ? $data['phoneNumber'] : null,
-            isset($data['company']) ? $data['company'] : null
+            isset($data['company']) ? $data['company'] : null,
+            isset($data['country']) ? $data['country'] : null,
+            isset($data['address']) ? $data['address'] : null,
+            isset($data['notes']) ? $data['notes'] : null
         ]));
         
         // Normalize phone number field - handle both phoneNumber and phone_number
@@ -346,7 +351,7 @@ try {
         // Get the company name if provided
         $company = isset($data['company']) ? $data['company'] : null;
         
-        // Insert new user using the database abstraction layer
+        // Insert new user
         executeUpdate($sql, [
             strtolower($data['email']),
             $hashed_password,
@@ -355,177 +360,37 @@ try {
             $data['firstName'] . ' ' . $data['lastName'],
             $phone_number, // Use the normalized phone number
             $company,
+            isset($data['country']) ? $data['country'] : null,
+            isset($data['address']) ? $data['address'] : null,
+            isset($data['notes']) ? $data['notes'] : null
         ]);
         
-        // Log the phone number value for debugging
-        error_log("REGISTER.PHP: Phone number value: " . (isset($data['phoneNumber']) ? $data['phoneNumber'] : 'NULL') . 
-                  ", Phone number alternative field: " . (isset($data['phone_number']) ? $data['phone_number'] : 'NULL') .
-                  ", Normalized value used: " . ($phone_number ?? 'NULL'));
-        
+        // Get the ID of the new user
         $user_id = lastInsertId();
-        error_log("REGISTER.PHP: New user inserted with ID: " . $user_id);
-        
-        // Log registration with full action name - UPDATED to use wp_charterhub_auth_logs
-        executeUpdate(
-            "INSERT INTO {$db_config['table_prefix']}charterhub_auth_logs 
-            (user_id, action, status, ip_address, user_agent, details) 
-            VALUES (?, 'register', 'success', ?, ?, ?)",
-            [
-                $user_id,
-                $_SERVER['REMOTE_ADDR'] ?? '::1',
-                $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown',
-                json_encode([
-                    'email' => $data['email'],
-                    'firstName' => $data['firstName'],
-                    'lastName' => $data['lastName'],
-                ])
-            ]
-        );
-        error_log("REGISTER.PHP: Auth log created for new user");
-        
-        // Now mark the invitation as used in the database
-        if ($isInvited && isset($data['invitationToken']) && !empty($data['invitationToken'])) {
-            try {
-                $invitationToken = trim($data['invitationToken']);
-                error_log("REGISTER.PHP: Marking invitation token as used: " . substr($invitationToken, 0, 8) . "...");
-                
-                // Update the invitation record
-                $updateResult = executeUpdate(
-                    "UPDATE {$db_config['table_prefix']}charterhub_invitations 
-                     SET used = 1, used_at = NOW(), used_by_user_id = ? 
-                     WHERE token = ? AND used = 0",
-                    [$user_id, $invitationToken]
-                );
-                
-                if ($updateResult) {
-                    error_log("REGISTER.PHP: Successfully marked invitation as used. Rows affected: " . $updateResult);
-                } else {
-                    error_log("REGISTER.PHP: No rows affected when marking invitation as used. Token: " . substr($invitationToken, 0, 8) . "...");
-                }
-            } catch (Exception $inviteError) {
-                // Log but don't fail registration if invitation update fails
-                error_log("REGISTER.PHP ERROR: Failed to mark invitation as used: " . $inviteError->getMessage());
-            }
-        }
-        
-        // Commit the transaction
-        commitTransaction();
-        error_log("REGISTER.PHP: Transaction committed successfully");
-        
-        // If this is an invited registration, link the user to the customer record
-        if ($isInvited && $clientId) {
-            try {
-                error_log("REGISTER.PHP: Linking new user ID {$user_id} to customer ID {$clientId}");
-                
-                // Start a new transaction for customer linking
-                beginTransaction();
-                
-                // First try to update the customer record in charterhub_customers table
-                $customerUpdateCount = executeUpdate(
-                    "UPDATE {$db_config['table_prefix']}charterhub_customers 
-                    SET user_id = ?, updated_at = NOW(), status = 'active'
-                    WHERE id = ?",
-                    [$user_id, $clientId]
-                );
-                
-                error_log("REGISTER.PHP: Updated {$customerUpdateCount} rows in charterhub_customers table");
-                
-                // If no rows were updated in charterhub_customers, this might be a client record
-                // stored directly in charterhub_users table with a link through ID
-                if ($customerUpdateCount == 0) {
-                    error_log("REGISTER.PHP: No rows updated in customers table, checking if client exists in users table");
-                    
-                    // Check if the client record exists in wp_charterhub_users
-                    $clientRecord = fetchRow(
-                        "SELECT id, role FROM {$db_config['table_prefix']}charterhub_users WHERE id = ?",
-                        [$clientId]
-                    );
-                    
-                    if ($clientRecord) {
-                        error_log("REGISTER.PHP: Found client record in charterhub_users table with ID {$clientId}");
-                        
-                        // This is a special case - we might want to merge the records or update metadata
-                        // For now, just log this situation
-                        error_log("REGISTER.PHP: Registration was for an existing user record. Creating special link record.");
-                        
-                        // Check if the charterhub_user_links table exists, create it if not
-                        $tableExists = fetchColumn(
-                            "SELECT COUNT(*) 
-                            FROM information_schema.tables 
-                            WHERE table_schema = DATABASE() 
-                            AND table_name = '{$db_config['table_prefix']}charterhub_user_links'",
-                            []
-                        );
-                        
-                        if ($tableExists == 0) {
-                            error_log("REGISTER.PHP: Creating charterhub_user_links table");
-                            
-                            executeUpdate("
-                                CREATE TABLE IF NOT EXISTS {$db_config['table_prefix']}charterhub_user_links (
-                                    id INT AUTO_INCREMENT PRIMARY KEY,
-                                    user_id INT NOT NULL,
-                                    linked_user_id INT NOT NULL,
-                                    link_type VARCHAR(50) NOT NULL,
-                                    created_at DATETIME NOT NULL,
-                                    updated_at DATETIME NULL,
-                                    metadata TEXT NULL
-                                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-                            ", []);
-                        }
-                        
-                        // Add a link record in a metadata table 
-                        executeUpdate(
-                            "INSERT INTO {$db_config['table_prefix']}charterhub_user_links 
-                            (user_id, linked_user_id, link_type, created_at) 
-                            VALUES (?, ?, 'invited_registration', NOW())",
-                            [$user_id, $clientId]
-                        );
-                    } else {
-                        error_log("REGISTER.PHP: Client ID {$clientId} not found in either customers or users table");
-                    }
-                }
-                
-                // Commit the customer linking transaction
-                commitTransaction();
-                error_log("REGISTER.PHP: Successfully completed linking process for user ID {$user_id} and client ID {$clientId}");
-            } catch (Exception $e) {
-                // If linking fails, log the error but don't abort the registration
-                error_log("REGISTER.PHP ERROR: Failed to link user to customer: " . $e->getMessage());
-                error_log("REGISTER.PHP ERROR: Stack trace: " . $e->getTraceAsString());
-                rollbackTransaction();
-            }
-        }
+        error_log("REGISTER.PHP: User registered with ID: " . $user_id);
 
-        // Generate verification URL
-        $verification_url = "/verify-email?token=" . $verification_token;
-        
-        // In development mode, return the verification URL directly
+        // In development mode, return a simple success response
         if (defined('DEBUG_MODE') && DEBUG_MODE) {
-            error_log("REGISTER.PHP: Sending success response with verification token");
+            error_log("REGISTER.PHP: Sending success response");
             send_json_response([
                 'success' => true,
-                'message' => 'Registration successful. Please verify your email.',
+                'message' => 'Registration successful. Your account is now active.',
                 'user_id' => $user_id,
-                'dev_mode' => true,
-                'verification' => [
-                    'url' => $verification_url,
-                    'token' => $verification_token
-                ]
+                'dev_mode' => true
             ]);
         } else {
-            // In production, send verification email
-            $email_subject = "Verify your CharterHub account";
+            // In production, send welcome email
+            $email_subject = "Welcome to CharterHub";
             $email_body = "Hello {$data['firstName']},\n\n";
-            $email_body .= "Thank you for registering with CharterHub. Please click the link below to verify your email address:\n\n";
-            $email_body .= $frontend_urls['base_url'] . "/verify-email?token=" . $verification_token . "\n\n";
-            $email_body .= "This link will expire in 24 hours.\n\n";
+            $email_body .= "Thank you for registering with CharterHub. Your account is now active.\n\n";
+            $email_body .= "You can login at " . $frontend_urls['base_url'] . "/login\n\n";
             $email_body .= "Best regards,\nThe CharterHub Team";
             
             send_email($data['email'], $email_subject, $email_body);
             
             send_json_response([
                 'success' => true,
-                'message' => 'Registration successful. Please check your email for verification instructions.'
+                'message' => 'Registration successful. Your account is now active.'
             ]);
         }
         
