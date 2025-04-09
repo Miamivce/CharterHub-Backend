@@ -1,31 +1,18 @@
 <?php
 header('Content-Type: application/json');
 
-// Fix CORS with specific origin instead of wildcard for credentials
-$allowed_origin = 'https://charter-hub.vercel.app';
-if (isset($_SERVER['HTTP_ORIGIN'])) {
-    if ($_SERVER['HTTP_ORIGIN'] === $allowed_origin) {
-        header("Access-Control-Allow-Origin: $allowed_origin");
-    } else {
-        // For development, also allow localhost origins
-        if (strpos($_SERVER['HTTP_ORIGIN'], 'localhost') !== false || 
-            strpos($_SERVER['HTTP_ORIGIN'], '127.0.0.1') !== false) {
-            header("Access-Control-Allow-Origin: {$_SERVER['HTTP_ORIGIN']}");
-        }
-    }
-}
-header('Access-Control-Allow-Methods: POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, x-requested-with, X-Requested-With');
-header('Access-Control-Allow-Credentials: true');
+// Use global CORS system instead of custom implementation
+define('CHARTERHUB_LOADED', true);
+include_once __DIR__ . '/config.php';
+require_once __DIR__ . '/../utils/database.php';  
+require_once __DIR__ . '/global-cors.php';
+
+// Apply CORS headers from the global system
+apply_global_cors(['POST', 'OPTIONS']);
 
 // Enable error reporting
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
-
-// Include database configuration
-define('CHARTERHUB_LOADED', true);
-include_once __DIR__ . '/config.php';
-require_once __DIR__ . '/../utils/database.php';
 
 // Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -113,18 +100,6 @@ try {
     }
     $new_wp_user_id = max(500, $max_wp_user_id + 1);
     
-    // Generate a unique ID for the user (starting from 500)
-    $stmt = $pdo->query("SELECT MAX(id) FROM wp_charterhub_users");
-    $max_id = 0;
-    if ($stmt) {
-        $result = $stmt->fetch(PDO::FETCH_NUM);
-        if ($result && isset($result[0])) {
-            $max_id = intval($result[0]);
-        }
-    }
-    $new_id = max(500, $max_id + 1);
-    error_log("MINIMAL-REGISTER.PHP: Generated new id: " . $new_id);
-    
     // Use company name if provided
     $company = isset($data['company']) ? $data['company'] : null;
     
@@ -136,16 +111,15 @@ try {
         $phone_number = $data['phone_number'];
     }
     
-    // Include id field explicitly in the SQL statement
+    // Let MySQL handle the ID with AUTO_INCREMENT
     $sql = "INSERT INTO wp_charterhub_users 
-            (id, email, password, first_name, last_name, display_name, 
+            (email, password, first_name, last_name, display_name, 
             phone_number, company, role, verified, token_version,
             wp_user_id, created_at, updated_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'client', 1, 0, ?, NOW(), NOW())";
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'client', 1, 0, ?, NOW(), NOW())";
     
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
-        $new_id,
         strtolower($data['email']),
         $hashed_password,
         $data['firstName'],
@@ -156,6 +130,7 @@ try {
         $new_wp_user_id
     ]);
     
+    // Get the auto-generated ID
     $user_id = $pdo->lastInsertId();
     error_log("MINIMAL-REGISTER.PHP: New user inserted with ID: " . $user_id);
     
