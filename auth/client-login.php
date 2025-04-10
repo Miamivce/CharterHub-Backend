@@ -168,7 +168,8 @@ try {
             throw new Exception("Failed to generate access token");
         }
         
-        error_log("CLIENT-LOGIN: Generating refresh token for user ID: {$user['id']}");
+        // First try to generate refresh token with database operations
+        error_log("CLIENT-LOGIN: Attempting to generate refresh token with database operations");
         $refresh_token = generate_refresh_token(
             $user['id'],
             $user['email'],
@@ -176,8 +177,42 @@ try {
             $user['token_version']
         );
         
+        // If refresh token generation fails, try with a simplified approach
         if (!$refresh_token) {
-            throw new Exception("Failed to generate refresh token");
+            error_log("CLIENT-LOGIN: Regular refresh token generation failed, creating simple token");
+            
+            // Create a simple refresh token directly
+            $refresh_secret = getenv('JWT_REFRESH_SECRET') ?: $jwt_secret;
+            $issued_at = time();
+            $expiration = $issued_at + 604800; // 7 days
+            $token_id = bin2hex(random_bytes(16));
+            
+            $payload = [
+                'iss' => 'charterhub',
+                'aud' => 'charterhub-refresh',
+                'iat' => $issued_at,
+                'exp' => $expiration,
+                'jti' => $token_id,
+                'sub' => $user['id'],
+                'email' => $user['email'],
+                'role' => $user['role'],
+                'token_version' => $user['token_version'],
+                'type' => 'refresh',
+                'simplified' => true
+            ];
+            
+            try {
+                $jwt = \Firebase\JWT\JWT::encode($payload, $refresh_secret, 'HS256');
+                $refresh_token = [
+                    'token' => $jwt,
+                    'token_id' => $token_id,
+                    'expires' => $expiration
+                ];
+                error_log("CLIENT-LOGIN: Created simplified refresh token successfully");
+            } catch (Exception $e) {
+                error_log("CLIENT-LOGIN: Failed to create simplified token: " . $e->getMessage());
+                throw $e; // Re-throw for outer try/catch
+            }
         }
         
         error_log("CLIENT-LOGIN: Successfully generated both tokens");
