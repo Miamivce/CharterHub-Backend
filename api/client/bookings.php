@@ -9,24 +9,35 @@
  * - POST: Create a new booking (currently empty, to be implemented)
  */
 
+// Prevent any output before headers
+@ini_set('display_errors', 0);
+error_reporting(0); // Temporarily disable error reporting for CORS setup
+
 // Check if constant is already defined before defining it
 if (!defined('CHARTERHUB_LOADED')) {
     define('CHARTERHUB_LOADED', true);
 }
 
 // Include necessary files
-require_once __DIR__ . '/../../auth/jwt-auth.php';
 require_once __DIR__ . '/../../auth/global-cors.php';
 
-// Enable CORS - Must be called before any output
+// Apply CORS headers BEFORE any other operation
 // Include OPTIONS method to support preflight requests
-apply_cors_headers(['GET', 'POST', 'OPTIONS']);
+if (!apply_cors_headers(['GET', 'POST', 'OPTIONS'])) {
+    exit; // Exit if CORS headers could not be sent
+}
 
 // Handle OPTIONS requests immediately for CORS preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    // The apply_cors_headers function already sets appropriate headers and exits for OPTIONS
-    exit;
+    exit; // The apply_cors_headers function already handles this, but just to be sure
 }
+
+// Re-enable error reporting now that CORS headers are sent
+error_reporting(E_ALL);
+@ini_set('display_errors', 1);
+
+// Now include JWT auth after CORS headers are sent
+require_once __DIR__ . '/../../auth/jwt-auth.php';
 
 // Initialize response
 $response = [

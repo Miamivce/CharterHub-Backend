@@ -1,33 +1,50 @@
 <?php
 /**
- * Document List Endpoint (Refactored)
+ * Document List API Endpoint
  * 
- * Uses the Document model and standardized responses
+ * This endpoint retrieves documents associated with bookings or users.
+ * 
+ * Supports:
+ * - GET: List documents by user ID, booking ID, or all documents for admin
  */
 
-// Define CHARTERHUB_LOADED for global CORS
-define('CHARTERHUB_LOADED', true);
+// Prevent any output before headers
+@ini_set('display_errors', 0);
+error_reporting(0); // Temporarily disable error reporting for CORS setup
+
+// Check if constant is already defined before defining it
+if (!defined('CHARTERHUB_LOADED')) {
+    define('CHARTERHUB_LOADED', true);
+}
+
+// Include global CORS handler first
+require_once __DIR__ . '/../../../auth/global-cors.php';
+
+// Apply CORS headers BEFORE any other operation
+// Include OPTIONS method to support preflight requests
+if (!apply_cors_headers(['GET', 'OPTIONS'])) {
+    exit; // Exit if CORS headers could not be sent
+}
+
+// Handle OPTIONS requests immediately for CORS preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit; // The apply_cors_headers function already handles this, but just to be sure
+}
+
+// Re-enable error reporting now that CORS headers are sent
+error_reporting(E_ALL);
+@ini_set('display_errors', 1);
+
+// Now include other files after CORS headers are sent
+require_once __DIR__ . '/../../../auth/jwt-auth.php';
+require_once __DIR__ . '/document-helper.php';
 
 // Include necessary files
-require_once __DIR__ . '/../../../auth/global-cors.php';
 require_once __DIR__ . '/../../../models/Document.php';
 require_once __DIR__ . '/../../../helpers/Response.php';
 require_once __DIR__ . '/../../../constants/DocumentTypes.php';
 require_once __DIR__ . '/../../../db-config.php';
 require_once __DIR__ . '/../../../auth/jwt-core.php';
-
-// Apply CORS for the endpoint
-apply_global_cors(['GET', 'OPTIONS']);
-
-// Handle preflight request
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit;
-}
-
-// Check request method
-if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-    Response::methodNotAllowed();
-}
 
 // Enable development mode for testing
 $isDevelopmentMode = false;

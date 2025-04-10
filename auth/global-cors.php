@@ -11,17 +11,21 @@ if (!defined('CHARTERHUB_LOADED')) {
     die('Direct access not allowed');
 }
 
-// Start output buffering to prevent unwanted output from included files
-// but don't force it if already started
-if (!ob_get_level()) {
-    ob_start();
+// Prevent any output before headers
+@ini_set('display_errors', 0);
+error_reporting(0); // Temporarily disable error reporting for CORS setup
+
+// Clear and start output buffering to prevent unwanted output from included files
+if (ob_get_level()) {
+    @ob_end_clean();
 }
+@ob_start();
 
 // Function to send JSON response consistently
 function send_json_response($data, $status_code = 200) {
     // Clear any output buffering to ensure clean response
     while (ob_get_level()) {
-        ob_end_clean();
+        @ob_end_clean();
     }
     
     // Set proper JSON content type and status code
@@ -38,6 +42,12 @@ function send_json_response($data, $status_code = 200) {
 
 // Function to apply CORS headers with allowed methods
 function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
+    // Ensure we can send headers
+    if (headers_sent($file, $line)) {
+        error_log("Headers already sent in $file:$line - Cannot send CORS headers");
+        return false;
+    }
+
     // Get allowed origins from environment variable or use defaults
     $env_origins = getenv('CORS_ALLOWED_ORIGINS');
     $env_origins_array = $env_origins ? explode(',', $env_origins) : [];
@@ -100,6 +110,8 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
             http_response_code(200);
             exit;
         }
+        
+        return true;
     } else {
         if (isset($_SERVER['HTTP_ORIGIN'])) {
             error_log("CORS request from disallowed origin: " . $_SERVER['HTTP_ORIGIN']);
@@ -115,10 +127,12 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
             ]);
             exit;
         }
+        
+        return false;
     }
 }
 
 // Alias for backward compatibility
 function apply_global_cors($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
-    apply_cors_headers($allowed_methods);
+    return apply_cors_headers($allowed_methods);
 } 
