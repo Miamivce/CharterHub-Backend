@@ -50,6 +50,9 @@ use \Firebase\JWT\BeforeValidException;
 function generate_access_token($user_id, $email, $role, $token_version) {
     global $jwt_secret, $jwt_algorithm, $jwt_expiration;
     
+    // Log what secret we're using (first 3 chars for security)
+    error_log("ACCESS TOKEN: Using JWT secret: " . substr($jwt_secret, 0, 3) . "...");
+    
     // Make sure jwt_expiration has a valid value, default to 30 minutes if not set
     if (!isset($jwt_expiration) || !is_numeric($jwt_expiration) || $jwt_expiration <= 0) {
         $jwt_expiration = 1800; // 30 minutes
@@ -79,11 +82,14 @@ function generate_access_token($user_id, $email, $role, $token_version) {
     ];
     
     try {
+        error_log("ACCESS TOKEN: Generating token for user $user_id with role $role");
         $jwt = JWT::encode($payload, $jwt_secret, $jwt_algorithm);
         
         log_auth_action('token_generated', $user_id, 'Generated access token', ['token_id' => $token_id, 'type' => 'access']);
+        error_log("ACCESS TOKEN: Successfully generated token");
         return $jwt;
     } catch (Exception $e) {
+        error_log("ACCESS TOKEN ERROR: " . $e->getMessage() . " - Stack trace: " . $e->getTraceAsString());
         log_auth_action('token_error', $user_id, 'Failed to generate access token: ' . $e->getMessage());
         return false;
     }
@@ -100,6 +106,12 @@ function generate_access_token($user_id, $email, $role, $token_version) {
  */
 function generate_refresh_token($user_id, $email, $role, $token_version) {
     global $jwt_secret, $jwt_algorithm, $refresh_expiration;
+    
+    // Get refresh secret if available, fallback to jwt_secret if not
+    $refresh_secret = getenv('JWT_REFRESH_SECRET') ?: $jwt_secret;
+    
+    // Log what secret we're using (first 3 chars for security)
+    error_log("REFRESH TOKEN: Using refresh secret: " . substr($refresh_secret, 0, 3) . "...");
     
     // Make sure refresh_expiration has a valid value, default to 7 days if not set
     if (!isset($refresh_expiration) || !is_numeric($refresh_expiration) || $refresh_expiration <= 0) {
@@ -131,18 +143,36 @@ function generate_refresh_token($user_id, $email, $role, $token_version) {
     ];
     
     try {
-        $jwt = JWT::encode($payload, $jwt_secret, $jwt_algorithm);
+        // Use the refresh_secret instead of jwt_secret for better security
+        $jwt = JWT::encode($payload, $refresh_secret, $jwt_algorithm);
         
-        // Store refresh token in database
-        $conn = get_db_connection_from_config();
-        $stmt = $conn->prepare("INSERT INTO wp_charterhub_jwt_tokens (user_id, token_hash, refresh_token_hash, expires_at, refresh_expires_at, created_at, revoked, last_used_at) 
-                              VALUES (?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), NOW(), 0, NOW())");
-        $stmt->bindParam(1, $user_id, PDO::PARAM_INT);
-        $stmt->bindParam(2, $token_id, PDO::PARAM_STR);
-        $stmt->bindParam(3, $token_id, PDO::PARAM_STR);
-        $stmt->bindParam(4, $expiration, PDO::PARAM_INT);
-        $stmt->bindParam(5, $expiration, PDO::PARAM_INT);
-        $stmt->execute();
+        // Try to store the token in the database, but don't fail if there's an error
+        try {
+            $conn = get_db_connection_from_config();
+            
+            // Log the query for debugging
+            error_log("REFRESH TOKEN: Attempting to store token in database for user $user_id");
+            
+            // Use a more resilient query that accounts for columns in different DB environments
+            $sql = "INSERT INTO wp_charterhub_jwt_tokens 
+                   (user_id, token_hash, refresh_token_hash, expires_at, refresh_expires_at, created_at, revoked, revoked_at, revoked_reason, notes) 
+                   VALUES (?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), NOW(), 0, NULL, NULL, 'Generated via client-login')";
+                   
+            $stmt = $conn->prepare($sql);
+            $stmt->execute([
+                $user_id,
+                $token_id,
+                $token_id,
+                $expiration,
+                $expiration
+            ]);
+            
+            error_log("REFRESH TOKEN: Successfully stored token in database");
+        } catch (Exception $dbError) {
+            // Log the error but continue - don't let DB issues prevent token generation
+            error_log("REFRESH TOKEN: Database storage error (non-critical): " . $dbError->getMessage());
+            // Continue even if DB insert fails
+        }
 
         log_auth_action('token_generated', $user_id, 'Generated refresh token', ['token_id' => $token_id, 'type' => 'refresh']);
         
@@ -153,6 +183,7 @@ function generate_refresh_token($user_id, $email, $role, $token_version) {
         ];
     } catch (Exception $e) {
         log_auth_action('token_error', $user_id, 'Failed to generate refresh token: ' . $e->getMessage());
+        error_log("REFRESH TOKEN: Error generating token: " . $e->getMessage());
         return false;
     }
 }

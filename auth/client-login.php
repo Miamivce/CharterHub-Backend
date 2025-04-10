@@ -155,27 +155,47 @@ try {
     );
     
     // Generate tokens
-    $access_token = generate_access_token(
-        $user['id'],
-        $user['email'],
-        $user['role'],
-        $user['token_version']
-    );
-    
-    $refresh_token = generate_refresh_token(
-        $user['id'],
-        $user['email'],
-        $user['role'],
-        $user['token_version']
-    );
+    try {
+        error_log("CLIENT-LOGIN: Generating access token for user ID: {$user['id']}");
+        $access_token = generate_access_token(
+            $user['id'],
+            $user['email'],
+            $user['role'],
+            $user['token_version']
+        );
+        
+        if (!$access_token) {
+            throw new Exception("Failed to generate access token");
+        }
+        
+        error_log("CLIENT-LOGIN: Generating refresh token for user ID: {$user['id']}");
+        $refresh_token = generate_refresh_token(
+            $user['id'],
+            $user['email'],
+            $user['role'],
+            $user['token_version']
+        );
+        
+        if (!$refresh_token) {
+            throw new Exception("Failed to generate refresh token");
+        }
+        
+        error_log("CLIENT-LOGIN: Successfully generated both tokens");
+    } catch (Exception $tokenError) {
+        log_auth_action('token_generation_failed', $user['id'], 'Failed to generate tokens: ' . $tokenError->getMessage());
+        error_log("CLIENT-LOGIN ERROR: Token generation failed: " . $tokenError->getMessage());
+        error_response('Authentication error. Please try again later.', 500, 'token_generation_failed');
+    }
     
     if (!$access_token || !$refresh_token) {
         log_auth_action('token_generation_failed', $user['id'], 'Failed to generate tokens');
+        error_log("CLIENT-LOGIN ERROR: Access token or refresh token is empty after generation");
         error_response('Authentication error. Please try again later.', 500, 'token_generation_failed');
     }
     
     // Set refresh token as HTTP-only cookie
-    set_refresh_token_cookie($refresh_token, time() + (86400 * 30)); // 30 days
+    error_log("CLIENT-LOGIN: Setting refresh token cookie with expiry in 30 days");
+    set_refresh_token_cookie($refresh_token['token'], time() + (86400 * 30)); // 30 days
     
     // Prepare user data to return
     $user_data = [
@@ -192,7 +212,7 @@ try {
     // Log successful login
     log_auth_action('client_login_success', $user['id'], 'Client login successful');
     
-    // Prepare response
+    // Prepare response to include access_token
     global $jwt_expiration;
     
     // If $jwt_expiration is not defined or null, set a default value (30 minutes)
@@ -200,6 +220,7 @@ try {
         $jwt_expiration = 1800;
     }
     
+    error_log("CLIENT-LOGIN: Sending successful response with token for user: {$user['email']}");
     json_response([
         'success' => true,
         'message' => 'Login successful',
