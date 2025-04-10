@@ -55,7 +55,8 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
         'https://charterhub.yachtstory.com',
         'https://staging-charterhub.yachtstory.com',
         'https://charter-p2f5lp7ws-maurits-s-projects.vercel.app',
-        'https://charter-hub.vercel.app'
+        'https://charter-hub.vercel.app',
+        'https://charter-hub-vercel.app'
     ];
 
     // Combine environment origins with default origins
@@ -73,6 +74,9 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
     $isDev = strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false;
     $isAllowed = in_array($origin, $allowed_origins);
 
+    // Enhanced logging for CORS diagnosis
+    error_log("CORS check: Origin=$origin, isDev=$isDev, isAllowed=$isAllowed");
+
     // Set CORS headers based on origin
     if ($isAllowed || $isDev) {
         header("Access-Control-Allow-Origin: $origin");
@@ -89,6 +93,9 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
         if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
             header("Access-Control-Max-Age: 86400"); // 24 hours
             
+            // Log preflight handling
+            error_log("CORS: Handling OPTIONS preflight request for origin: $origin");
+            
             // End response for preflight with 200 status
             http_response_code(200);
             exit;
@@ -102,7 +109,9 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
             echo json_encode([
                 'success' => false,
                 'message' => 'CORS policy: Origin not allowed',
-                'code' => 'cors_origin_denied'
+                'code' => 'cors_origin_denied',
+                'origin' => $_SERVER['HTTP_ORIGIN'],
+                'allowed_origins' => $allowed_origins
             ]);
             exit;
         }

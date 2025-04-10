@@ -19,7 +19,14 @@ require_once __DIR__ . '/../../auth/jwt-auth.php';
 require_once __DIR__ . '/../../auth/global-cors.php';
 
 // Enable CORS - Must be called before any output
-apply_cors_headers();
+// Include OPTIONS method to support preflight requests
+apply_cors_headers(['GET', 'POST', 'OPTIONS']);
+
+// Handle OPTIONS requests immediately for CORS preflight
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    // The apply_cors_headers function already sets appropriate headers and exits for OPTIONS
+    exit;
+}
 
 // Initialize response
 $response = [
