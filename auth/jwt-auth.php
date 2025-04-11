@@ -22,10 +22,22 @@ function verify_jwt_token() {
     $headers = getallheaders();
     error_log("JWT-AUTH: Headers received: " . json_encode(array_keys($headers)));
     
-    $auth_header = isset($headers['Authorization']) ? $headers['Authorization'] : '';
-    if (empty($auth_header)) {
-        // Try alternate header format
-        $auth_header = isset($headers['authorization']) ? $headers['authorization'] : '';
+    $auth_header = null;
+    
+    // Try multiple header formats for better compatibility
+    $header_names = ['Authorization', 'authorization', 'HTTP_AUTHORIZATION'];
+    foreach ($header_names as $name) {
+        if (isset($headers[$name]) && !empty($headers[$name])) {
+            $auth_header = $headers[$name];
+            error_log("JWT-AUTH: Found token in header: " . $name);
+            break;
+        }
+    }
+    
+    // If still not found, check if passed as a GET parameter (not recommended, but good for testing)
+    if (empty($auth_header) && isset($_GET['token'])) {
+        $auth_header = 'Bearer ' . $_GET['token'];
+        error_log("JWT-AUTH: Using token from GET parameter (not secure for production!)");
     }
     
     error_log("JWT-AUTH: Authorization header: " . (empty($auth_header) ? "Not found" : substr($auth_header, 0, 20) . "..."));
@@ -38,6 +50,11 @@ function verify_jwt_token() {
     
     $jwt = $matches[1];
     error_log("JWT-AUTH: Token extracted, length: " . strlen($jwt));
+    
+    if (strlen($jwt) < 10) {
+        error_log("JWT-AUTH: Token too short, likely invalid");
+        return false;
+    }
     
     try {
         // Verify token using core function
@@ -56,6 +73,37 @@ function verify_jwt_token() {
         ];
         
         error_log("JWT-AUTH: Authentication successful for user ID: " . $user['id']);
+        
+        // Validate that the user actually exists in the database
+        try {
+            $conn = getDbConnection();
+            if ($conn) {
+                // Look for users table with or without prefix
+                $users_table = 'wp_charterhub_users'; // Default
+                $tables_result = $conn->query("SHOW TABLES");
+                
+                if ($tables_result) {
+                    while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
+                        if (stripos($row[0], 'charterhub_users') !== false) {
+                            $users_table = $row[0];
+                            break;
+                        }
+                    }
+                }
+                
+                $stmt = $conn->prepare("SELECT id FROM " . $users_table . " WHERE id = ? LIMIT 1");
+                $stmt->execute([$user['id']]);
+                
+                if ($stmt->rowCount() == 0) {
+                    error_log("JWT-AUTH: User ID " . $user['id'] . " from token not found in database");
+                    return false;
+                }
+            }
+        } catch (Exception $e) {
+            error_log("JWT-AUTH: Error checking user in database: " . $e->getMessage());
+            // Continue even if we can't validate against the database
+        }
+        
         return $user;
     } catch (Exception $e) {
         error_log("JWT Authentication Failed: " . $e->getMessage());
