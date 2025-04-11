@@ -13,6 +13,20 @@ apply_global_cors(['GET']);
 // Set JSON content type
 header('Content-Type: application/json');
 
+// Security check - simple token validation
+$allowed_tokens = ['debug12345', 'charterhub_diag'];
+$provided_token = isset($_GET['token']) ? $_GET['token'] : '';
+
+if (!in_array($provided_token, $allowed_tokens)) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Direct access not allowed',
+        'error' => 'authentication_required',
+        'help' => 'Add ?token=debug12345 to the URL to access this diagnostic tool'
+    ]);
+    exit;
+}
+
 // Enable error display for diagnostic purposes
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
