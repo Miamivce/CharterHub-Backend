@@ -39,6 +39,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 error_reporting(E_ALL);
 @ini_set('display_errors', 1);
 
+// Set log error details
+ini_set('log_errors', 1);
+error_log("DIAGNOSTICS - PHP Version: " . PHP_VERSION);
+error_log("DIAGNOSTICS - Using updated code with column detection (v2)");
+
 // Now include JWT auth after CORS headers are sent
 require_once __DIR__ . '/../../auth/jwt-auth.php';
 
@@ -105,8 +110,15 @@ try {
  */
 function handle_get_request($user) {
     try {
+        error_log("BOOKINGS.PHP - Starting GET request handler for user ID: " . $user['id']);
+        
         // Using the database connection function from jwt-auth.php
         $conn = get_database_connection();
+        if (!$conn) {
+            error_log("BOOKINGS.PHP - Failed to get database connection");
+            throw new Exception("Database connection failed");
+        }
+        error_log("BOOKINGS.PHP - Database connection established");
         
         // Get user ID from authenticated token
         $user_id = $user['id'];
@@ -116,27 +128,58 @@ function handle_get_request($user) {
         
         // Determine the correct column name by checking table structure
         $charterer_column = 'main_charterer_id'; // Default column name
+        $columns = [];
+        
         try {
-            $describe_query = "DESCRIBE wp_charterhub_bookings";
-            $describe_stmt = $conn->prepare($describe_query);
-            $describe_stmt->execute();
-            $result = $describe_stmt->get_result();
+            // First, check if the bookings table exists
+            $tables_query = "SHOW TABLES LIKE 'wp_charterhub_bookings'";
+            $tables_result = $conn->query($tables_query);
             
-            $columns = [];
-            while ($row = $result->fetch_assoc()) {
+            if (!$tables_result) {
+                error_log("BOOKINGS.PHP - Error checking tables: " . $conn->error);
+                throw new Exception("Error checking database tables");
+            }
+            
+            $table_exists = ($tables_result->num_rows > 0);
+            error_log("BOOKINGS.PHP - Bookings table exists: " . ($table_exists ? "YES" : "NO"));
+            
+            if (!$table_exists) {
+                error_log("BOOKINGS.PHP - wp_charterhub_bookings table not found");
+                throw new Exception("Bookings table not found in database");
+            }
+            
+            // Check table columns
+            $describe_query = "DESCRIBE wp_charterhub_bookings";
+            $describe_result = $conn->query($describe_query);
+            
+            if (!$describe_result) {
+                error_log("BOOKINGS.PHP - Error describing table: " . $conn->error);
+                throw new Exception("Failed to get table structure");
+            }
+            
+            while ($row = $describe_result->fetch_assoc()) {
                 $columns[] = $row['Field'];
             }
-            $describe_stmt->close();
             
-            error_log("Booking table columns: " . implode(", ", $columns));
+            error_log("BOOKINGS.PHP - Found columns: " . implode(", ", $columns));
             
             // Check if main_charterer_id or customer_id is used
-            $charterer_column = in_array('main_charterer_id', $columns) ? 'main_charterer_id' : 'customer_id';
-            error_log("Using charterer column: " . $charterer_column);
+            if (in_array('main_charterer_id', $columns)) {
+                $charterer_column = 'main_charterer_id';
+                error_log("BOOKINGS.PHP - Using column: main_charterer_id");
+            } elseif (in_array('customer_id', $columns)) {
+                $charterer_column = 'customer_id';
+                error_log("BOOKINGS.PHP - Using column: customer_id");
+            } else {
+                error_log("BOOKINGS.PHP - Neither main_charterer_id nor customer_id found, columns available: " . implode(", ", $columns));
+                throw new Exception("Required column not found in bookings table");
+            }
         } catch (Exception $e) {
-            error_log("Error determining column name, using default: " . $e->getMessage());
-            // Continue with default column name
+            error_log("BOOKINGS.PHP - Error determining column name: " . $e->getMessage());
+            // We'll try to continue with the default column name
         }
+        
+        error_log("BOOKINGS.PHP - Using charterer column: " . $charterer_column);
         
         // Base query to get bookings where user is main charterer or guest
         $query = "SELECT 
@@ -170,56 +213,75 @@ function handle_get_request($user) {
         
         $query .= " ORDER BY b.created_at DESC";
         
+        error_log("BOOKINGS.PHP - Prepared query: " . $query);
+        error_log("BOOKINGS.PHP - Query params: " . implode(", ", $params));
+        
         // Prepare and execute query
         $stmt = $conn->prepare($query);
         if (!$stmt) {
+            error_log("BOOKINGS.PHP - Failed to prepare query: " . $conn->error);
             throw new Exception("Failed to prepare booking query: " . $conn->error);
         }
         
         $stmt->bind_param($types, ...$params);
-        $stmt->execute();
+        $execute_result = $stmt->execute();
+        
+        if (!$execute_result) {
+            error_log("BOOKINGS.PHP - Failed to execute query: " . $stmt->error);
+            throw new Exception("Failed to execute booking query: " . $stmt->error);
+        }
+        
         $result = $stmt->get_result();
         
         // Check for errors
         if (!$result) {
+            error_log("BOOKINGS.PHP - SQL Error in bookings query: " . $conn->error);
             throw new Exception("SQL Error in bookings query: " . $conn->error);
         }
+        
+        error_log("BOOKINGS.PHP - Query executed successfully, found " . $result->num_rows . " bookings");
         
         // Fetch all bookings
         $bookings = [];
         while ($row = $result->fetch_assoc()) {
             // Get booking guests (separate query for each booking)
             $booking_id = $row['id'];
-            $guests_query = "SELECT 
-                                bg.id as booking_guest_id,
-                                bg.user_id,
-                                u.first_name,
-                                u.last_name,
-                                u.email
-                              FROM wp_charterhub_booking_guests bg
-                              LEFT JOIN wp_charterhub_users u ON bg.user_id = u.id
-                              WHERE bg.booking_id = ?";
             
-            $guests_stmt = $conn->prepare($guests_query);
-            if (!$guests_stmt) {
-                error_log("Failed to prepare guests query: " . $conn->error);
-                continue; // Skip guests but continue with booking
-            }
-            
-            $guests_stmt->bind_param("i", $booking_id);
-            $guests_stmt->execute();
-            $guests_result = $guests_stmt->get_result();
-            
+            // Try to get guests or continue without them if there's an error
             $guests = [];
-            while ($guest_row = $guests_result->fetch_assoc()) {
-                $guests[] = [
-                    'id' => (int)$guest_row['user_id'],
-                    'firstName' => $guest_row['first_name'],
-                    'lastName' => $guest_row['last_name'],
-                    'email' => $guest_row['email']
-                ];
+            try {
+                $guests_query = "SELECT 
+                                    bg.id as booking_guest_id,
+                                    bg.user_id,
+                                    u.first_name,
+                                    u.last_name,
+                                    u.email
+                                FROM wp_charterhub_booking_guests bg
+                                LEFT JOIN wp_charterhub_users u ON bg.user_id = u.id
+                                WHERE bg.booking_id = ?";
+                
+                $guests_stmt = $conn->prepare($guests_query);
+                if (!$guests_stmt) {
+                    error_log("BOOKINGS.PHP - Failed to prepare guests query: " . $conn->error);
+                } else {
+                    $guests_stmt->bind_param("i", $booking_id);
+                    $guests_stmt->execute();
+                    $guests_result = $guests_stmt->get_result();
+                    
+                    while ($guest_row = $guests_result->fetch_assoc()) {
+                        $guests[] = [
+                            'id' => (int)$guest_row['user_id'],
+                            'firstName' => $guest_row['first_name'],
+                            'lastName' => $guest_row['last_name'],
+                            'email' => $guest_row['email']
+                        ];
+                    }
+                    $guests_stmt->close();
+                }
+            } catch (Exception $e) {
+                error_log("BOOKINGS.PHP - Error fetching guests for booking ID " . $booking_id . ": " . $e->getMessage());
+                // Continue with empty guests array
             }
-            $guests_stmt->close();
             
             // Format the booking with all related data
             $bookings[] = [
@@ -246,6 +308,8 @@ function handle_get_request($user) {
         $stmt->close();
         $conn->close();
         
+        error_log("BOOKINGS.PHP - Successfully processed GET request, returning " . count($bookings) . " bookings");
+        
         // Return single booking or list based on request
         if (isset($_GET['id'])) {
             json_response([
@@ -261,11 +325,20 @@ function handle_get_request($user) {
             ]);
         }
     } catch (Exception $e) {
-        error_log("Error in client bookings GET request: " . $e->getMessage());
+        error_log("BOOKINGS.PHP - Error in GET request: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
+        error_log("BOOKINGS.PHP - Stack trace: " . $e->getTraceAsString());
+        
+        // Return a more detailed error response for troubleshooting
         json_response([
             'success' => false,
             'message' => 'Error retrieving booking data',
-            'error' => 'database_error'
+            'error' => 'database_error',
+            'details' => $e->getMessage(),
+            'diagnostics' => [
+                'php_version' => PHP_VERSION,
+                'column_detection' => true,
+                'columns_found' => isset($columns) ? $columns : []
+            ]
         ], 500);
     }
 }

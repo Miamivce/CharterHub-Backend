@@ -149,36 +149,58 @@ try {
                 // Determine the correct column name first
                 $charterer_column = 'main_charterer_id'; // Default
                 try {
-                    // Check table structure to determine the correct column name
+                    error_log("ME.PHP - Checking bookings table structure");
+                    
+                    // First, check if the bookings table exists
+                    $tables_result = fetchRows("SHOW TABLES LIKE 'wp_charterhub_bookings'");
+                    $table_exists = !empty($tables_result);
+                    error_log("ME.PHP - Bookings table exists: " . ($table_exists ? "YES" : "NO"));
+                    
+                    if (!$table_exists) {
+                        error_log("ME.PHP - wp_charterhub_bookings table not found");
+                        throw new Exception("Bookings table not found in database");
+                    }
+                    
+                    // Check table columns
                     $describe_result = fetchRows("DESCRIBE wp_charterhub_bookings");
                     if ($describe_result) {
                         $columns = array_column($describe_result, 'Field');
-                        error_log("Booking table columns: " . implode(", ", $columns));
+                        error_log("ME.PHP - Found columns: " . implode(", ", $columns));
                         
                         // Check if main_charterer_id or customer_id is used
-                        $charterer_column = in_array('main_charterer_id', $columns) ? 'main_charterer_id' : 'customer_id';
-                        error_log("Using charterer column: " . $charterer_column);
+                        if (in_array('main_charterer_id', $columns)) {
+                            $charterer_column = 'main_charterer_id';
+                            error_log("ME.PHP - Using column: main_charterer_id");
+                        } elseif (in_array('customer_id', $columns)) {
+                            $charterer_column = 'customer_id';
+                            error_log("ME.PHP - Using column: customer_id");
+                        } else {
+                            error_log("ME.PHP - Neither main_charterer_id nor customer_id found, columns available: " . implode(", ", $columns));
+                            throw new Exception("Required column not found in bookings table");
+                        }
                     }
                 } catch (Exception $col_e) {
-                    error_log("Error determining column name, using default: " . $col_e->getMessage());
+                    error_log("ME.PHP - Error determining column name: " . $col_e->getMessage());
                     // Continue with default column name
                 }
                 
+                error_log("ME.PHP - Using charterer column: " . $charterer_column);
+                
                 // Use the determined column name in the query
-                $booking_result = fetchRow("
-                    SELECT 
-                        COUNT(id) AS bookings_count
-                    FROM 
-                        wp_charterhub_bookings
-                    WHERE 
-                        $charterer_column = ?
-                ", [(int)$user['id']]);
+                $query = "SELECT COUNT(id) AS bookings_count FROM wp_charterhub_bookings WHERE $charterer_column = ?";
+                error_log("ME.PHP - Bookings count query: " . $query);
+                
+                $booking_result = fetchRow($query, [(int)$user['id']]);
                 
                 if ($booking_result && isset($booking_result['bookings_count'])) {
                     $bookings_count = (int)$booking_result['bookings_count'];
+                    error_log("ME.PHP - Found " . $bookings_count . " bookings for user ID " . $user['id']);
+                } else {
+                    error_log("ME.PHP - No bookings found or invalid result format");
                 }
             } catch (Exception $e) {
-                error_log("Error fetching bookings count: " . $e->getMessage());
+                error_log("ME.PHP - Error fetching bookings count: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
+                error_log("ME.PHP - Stack trace: " . $e->getTraceAsString());
                 // Continue with zero as the count - non-fatal error
             }
 
