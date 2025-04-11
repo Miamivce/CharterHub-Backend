@@ -66,6 +66,7 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
         'https://staging-charterhub.yachtstory.com',
         'https://charter-p2f5lp7ws-maurits-s-projects.vercel.app',
         'https://charter-hub.vercel.app',
+        'https://charter-hub-git-main-maurits-s-projects.vercel.app',
         'https://charter-hub-vercel.app'
     ];
 
@@ -83,6 +84,21 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
     // Check if origin is allowed or if we're in development mode
     $isDev = strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false;
     $isAllowed = in_array($origin, $allowed_origins);
+
+    // For wildcard-enabled domains (only enable this for trusted domains)
+    if (!$isAllowed && $origin) {
+        foreach ($allowed_origins as $allowed) {
+            // Support wildcard matching like *.vercel.app
+            if (strpos($allowed, '*') !== false) {
+                $pattern = '/^' . str_replace('\*', '.*', preg_quote($allowed, '/')) . '$/';
+                if (preg_match($pattern, $origin)) {
+                    $isAllowed = true;
+                    error_log("CORS: Origin $origin matched wildcard pattern $allowed");
+                    break;
+                }
+            }
+        }
+    }
 
     // Enhanced logging for CORS diagnosis
     error_log("CORS check: Origin=$origin, isDev=$isDev, isAllowed=$isAllowed");

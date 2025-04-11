@@ -9,9 +9,12 @@
  * - POST: Create a new booking (currently empty, to be implemented)
  */
 
-// Prevent any output before headers
+// Prevent any output before headers and ensure proper content type
 @ini_set('display_errors', 0);
 error_reporting(0); // Temporarily disable error reporting for CORS setup
+
+// Ensure proper JSON content type for all responses
+header('Content-Type: application/json');
 
 // Check if constant is already defined before defining it
 if (!defined('CHARTERHUB_LOADED')) {
@@ -58,31 +61,41 @@ if (isset(getallheaders()['Authorization'])) {
     error_log("BOOKINGS.PHP - No Authorization header found");
 }
 
-$user = verify_jwt_token();
-if (!$user) {
-    error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
-    json_response([
-        'success' => false,
-        'message' => 'Unauthorized access'
-    ], 401);
-    exit;
-} else {
-    error_log("BOOKINGS.PHP - JWT verification successful, user ID: " . $user['id']);
-}
-
-// Handle different HTTP methods
-switch ($_SERVER['REQUEST_METHOD']) {
-    case 'GET':
-        handle_get_request($user);
-        break;
-    case 'POST':
-        handle_post_request($user);
-        break;
-    default:
+try {
+    $user = verify_jwt_token();
+    if (!$user) {
+        error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
         json_response([
             'success' => false,
-            'message' => 'Method not allowed'
-        ], 405);
+            'message' => 'Unauthorized access'
+        ], 401);
+        exit;
+    } else {
+        error_log("BOOKINGS.PHP - JWT verification successful, user ID: " . $user['id']);
+    }
+
+    // Handle different HTTP methods
+    switch ($_SERVER['REQUEST_METHOD']) {
+        case 'GET':
+            handle_get_request($user);
+            break;
+        case 'POST':
+            handle_post_request($user);
+            break;
+        default:
+            json_response([
+                'success' => false,
+                'message' => 'Method not allowed'
+            ], 405);
+    }
+} catch (Exception $e) {
+    // Catch any unexpected errors and return proper JSON response
+    error_log("BOOKINGS.PHP - Unexpected error: " . $e->getMessage());
+    json_response([
+        'success' => false,
+        'message' => 'An unexpected error occurred',
+        'error' => 'internal_server_error'
+    ], 500);
 }
 
 /**
@@ -91,131 +104,145 @@ switch ($_SERVER['REQUEST_METHOD']) {
  * @param array $user Authenticated user data
  */
 function handle_get_request($user) {
-    // Using the database connection function from jwt-auth.php
-    $conn = get_database_connection();
-    
-    // Get user ID from authenticated token
-    $user_id = $user['id'];
-    
-    // Get specific booking if ID is provided
-    $booking_id = isset($_GET['id']) ? intval($_GET['id']) : null;
-    
-    // Base query to get bookings where user is main charterer or guest
-    $query = "SELECT 
-                b.id,
-                b.yacht_id,
-                y.name as yacht_name,
-                b.start_date,
-                b.end_date,
-                b.status,
-                b.total_price,
-                b.main_charterer_id,
-                u_main.first_name as main_charterer_first_name,
-                u_main.last_name as main_charterer_last_name,
-                u_main.email as main_charterer_email,
-                b.created_at
-              FROM wp_charterhub_bookings b
-              LEFT JOIN wp_charterhub_yachts y ON b.yacht_id = y.id
-              LEFT JOIN wp_charterhub_users u_main ON b.main_charterer_id = u_main.id
-              WHERE (b.main_charterer_id = ? OR 
-                    b.id IN (SELECT booking_id FROM wp_charterhub_booking_guests WHERE user_id = ?))";
-    
-    $params = [$user_id, $user_id];
-    $types = "ii";
-    
-    // If specific booking ID requested, add that condition
-    if ($booking_id) {
-        $query .= " AND b.id = ?";
-        $params[] = $booking_id;
-        $types .= "i";
-    }
-    
-    $query .= " ORDER BY b.created_at DESC";
-    
-    // Prepare and execute query
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    // Check for errors
-    if (!$result) {
-        error_log("SQL Error in bookings query: " . $conn->error);
-        json_response([
-            'success' => false,
-            'message' => 'Database error retrieving bookings'
-        ], 500);
-    }
-    
-    // Fetch all bookings
-    $bookings = [];
-    while ($row = $result->fetch_assoc()) {
-        // Get booking guests (separate query for each booking)
-        $booking_id = $row['id'];
-        $guests_query = "SELECT 
-                            bg.id as booking_guest_id,
-                            bg.user_id,
-                            u.first_name,
-                            u.last_name,
-                            u.email
-                          FROM wp_charterhub_booking_guests bg
-                          LEFT JOIN wp_charterhub_users u ON bg.user_id = u.id
-                          WHERE bg.booking_id = ?";
+    try {
+        // Using the database connection function from jwt-auth.php
+        $conn = get_database_connection();
         
-        $guests_stmt = $conn->prepare($guests_query);
-        $guests_stmt->bind_param("i", $booking_id);
-        $guests_stmt->execute();
-        $guests_result = $guests_stmt->get_result();
+        // Get user ID from authenticated token
+        $user_id = $user['id'];
         
-        $guests = [];
-        while ($guest_row = $guests_result->fetch_assoc()) {
-            $guests[] = [
-                'id' => (int)$guest_row['user_id'],
-                'firstName' => $guest_row['first_name'],
-                'lastName' => $guest_row['last_name'],
-                'email' => $guest_row['email']
+        // Get specific booking if ID is provided
+        $booking_id = isset($_GET['id']) ? intval($_GET['id']) : null;
+        
+        // Base query to get bookings where user is main charterer or guest
+        $query = "SELECT 
+                    b.id,
+                    b.yacht_id,
+                    y.name as yacht_name,
+                    b.start_date,
+                    b.end_date,
+                    b.status,
+                    b.total_price,
+                    b.main_charterer_id,
+                    u_main.first_name as main_charterer_first_name,
+                    u_main.last_name as main_charterer_last_name,
+                    u_main.email as main_charterer_email,
+                    b.created_at
+                  FROM wp_charterhub_bookings b
+                  LEFT JOIN wp_charterhub_yachts y ON b.yacht_id = y.id
+                  LEFT JOIN wp_charterhub_users u_main ON b.main_charterer_id = u_main.id
+                  WHERE (b.main_charterer_id = ? OR 
+                        b.id IN (SELECT booking_id FROM wp_charterhub_booking_guests WHERE user_id = ?))";
+        
+        $params = [$user_id, $user_id];
+        $types = "ii";
+        
+        // If specific booking ID requested, add that condition
+        if ($booking_id) {
+            $query .= " AND b.id = ?";
+            $params[] = $booking_id;
+            $types .= "i";
+        }
+        
+        $query .= " ORDER BY b.created_at DESC";
+        
+        // Prepare and execute query
+        $stmt = $conn->prepare($query);
+        if (!$stmt) {
+            throw new Exception("Failed to prepare booking query: " . $conn->error);
+        }
+        
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // Check for errors
+        if (!$result) {
+            throw new Exception("SQL Error in bookings query: " . $conn->error);
+        }
+        
+        // Fetch all bookings
+        $bookings = [];
+        while ($row = $result->fetch_assoc()) {
+            // Get booking guests (separate query for each booking)
+            $booking_id = $row['id'];
+            $guests_query = "SELECT 
+                                bg.id as booking_guest_id,
+                                bg.user_id,
+                                u.first_name,
+                                u.last_name,
+                                u.email
+                              FROM wp_charterhub_booking_guests bg
+                              LEFT JOIN wp_charterhub_users u ON bg.user_id = u.id
+                              WHERE bg.booking_id = ?";
+            
+            $guests_stmt = $conn->prepare($guests_query);
+            if (!$guests_stmt) {
+                error_log("Failed to prepare guests query: " . $conn->error);
+                continue; // Skip guests but continue with booking
+            }
+            
+            $guests_stmt->bind_param("i", $booking_id);
+            $guests_stmt->execute();
+            $guests_result = $guests_stmt->get_result();
+            
+            $guests = [];
+            while ($guest_row = $guests_result->fetch_assoc()) {
+                $guests[] = [
+                    'id' => (int)$guest_row['user_id'],
+                    'firstName' => $guest_row['first_name'],
+                    'lastName' => $guest_row['last_name'],
+                    'email' => $guest_row['email']
+                ];
+            }
+            $guests_stmt->close();
+            
+            // Format the booking with all related data
+            $bookings[] = [
+                'id' => (int)$row['id'],
+                'startDate' => $row['start_date'],
+                'endDate' => $row['end_date'],
+                'status' => $row['status'],
+                'totalPrice' => (float)$row['total_price'],
+                'createdAt' => $row['created_at'],
+                'yacht' => [
+                    'id' => (int)$row['yacht_id'],
+                    'name' => $row['yacht_name']
+                ],
+                'mainCharterer' => [
+                    'id' => (int)$row['main_charterer_id'],
+                    'firstName' => $row['main_charterer_first_name'],
+                    'lastName' => $row['main_charterer_last_name'],
+                    'email' => $row['main_charterer_email']
+                ],
+                'guestList' => $guests
             ];
         }
-        $guests_stmt->close();
         
-        // Format the booking with all related data
-        $bookings[] = [
-            'id' => (int)$row['id'],
-            'startDate' => $row['start_date'],
-            'endDate' => $row['end_date'],
-            'status' => $row['status'],
-            'totalPrice' => (float)$row['total_price'],
-            'createdAt' => $row['created_at'],
-            'yacht' => [
-                'id' => (int)$row['yacht_id'],
-                'name' => $row['yacht_name']
-            ],
-            'mainCharterer' => [
-                'id' => (int)$row['main_charterer_id'],
-                'firstName' => $row['main_charterer_first_name'],
-                'lastName' => $row['main_charterer_last_name'],
-                'email' => $row['main_charterer_email']
-            ],
-            'guestList' => $guests
-        ];
-    }
-    
-    $stmt->close();
-    $conn->close();
-    
-    // Return single booking or list based on request
-    if (isset($_GET['id'])) {
+        $stmt->close();
+        $conn->close();
+        
+        // Return single booking or list based on request
+        if (isset($_GET['id'])) {
+            json_response([
+                'success' => true,
+                'message' => 'Booking retrieved successfully',
+                'data' => !empty($bookings) ? $bookings[0] : null
+            ]);
+        } else {
+            json_response([
+                'success' => true,
+                'message' => 'Bookings retrieved successfully',
+                'data' => $bookings
+            ]);
+        }
+    } catch (Exception $e) {
+        error_log("Error in client bookings GET request: " . $e->getMessage());
         json_response([
-            'success' => true,
-            'message' => 'Booking retrieved successfully',
-            'data' => !empty($bookings) ? $bookings[0] : null
-        ]);
-    } else {
-        json_response([
-            'success' => true,
-            'message' => 'Bookings retrieved successfully',
-            'data' => $bookings
-        ]);
+            'success' => false,
+            'message' => 'Error retrieving booking data',
+            'error' => 'database_error'
+        ], 500);
     }
 }
 
