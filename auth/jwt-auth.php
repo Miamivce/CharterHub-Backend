@@ -90,27 +90,21 @@ function json_response($data, $status = 200) {
 /**
  * Get database connection
  * 
- * @return mysqli Database connection
+ * @return mysqli|PDO Database connection
  */
 function get_database_connection() {
-    // Database configuration
-    $db_host = 'localhost';
-    $db_name = 'charterhub_local';
-    $db_user = 'charterhub_user';
-    $db_pass = 'charterhub_password';
+    // Use the database utilities that are working in the application
+    require_once dirname(__FILE__) . '/../utils/database.php';
     
-    // Create connection
-    $conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
-    
-    // Check connection
-    if ($conn->connect_error) {
-        error_log("Database connection failed: " . $conn->connect_error);
+    try {
+        // Use the working PDO connection
+        return getDbConnection();
+    } catch (Exception $e) {
+        error_log("Database connection failed in jwt-auth.php: " . $e->getMessage());
         json_response([
             'success' => false,
             'message' => 'Database connection error'
         ], 500);
         exit;
     }
-    
-    return $conn;
 } 

@@ -196,11 +196,11 @@ function handle_get_request($user) {
             $tables_result = $conn->query($tables_query);
             
             if (!$tables_result) {
-                error_log("BOOKINGS.PHP - Error checking tables: " . $conn->error);
+                error_log("BOOKINGS.PHP - Error checking tables: " . $conn->errorInfo()[2]);
                 throw new Exception("Error checking database tables");
             }
             
-            $table_exists = ($tables_result->num_rows > 0);
+            $table_exists = ($tables_result->rowCount() > 0);
             error_log("BOOKINGS.PHP - Bookings table exists: " . ($table_exists ? "YES" : "NO"));
             
             if (!$table_exists) {
@@ -213,11 +213,11 @@ function handle_get_request($user) {
             $describe_result = $conn->query($describe_query);
             
             if (!$describe_result) {
-                error_log("BOOKINGS.PHP - Error describing table: " . $conn->error);
+                error_log("BOOKINGS.PHP - Error describing table: " . $conn->errorInfo()[2]);
                 throw new Exception("Failed to get table structure");
             }
             
-            while ($row = $describe_result->fetch_assoc()) {
+            while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
                 $columns[] = $row['Field'];
             }
             
@@ -262,13 +262,11 @@ function handle_get_request($user) {
                         b.id IN (SELECT booking_id FROM wp_charterhub_booking_guests WHERE user_id = ?))";
         
         $params = [$user_id, $user_id];
-        $types = "ii";
         
         // If specific booking ID requested, add that condition
         if ($booking_id) {
             $query .= " AND b.id = ?";
             $params[] = $booking_id;
-            $types .= "i";
         }
         
         $query .= " ORDER BY b.created_at DESC";
@@ -276,34 +274,29 @@ function handle_get_request($user) {
         error_log("BOOKINGS.PHP - Prepared query: " . $query);
         error_log("BOOKINGS.PHP - Query params: " . implode(", ", $params));
         
-        // Prepare and execute query
+        // Prepare and execute query using PDO
         $stmt = $conn->prepare($query);
         if (!$stmt) {
-            error_log("BOOKINGS.PHP - Failed to prepare query: " . $conn->error);
-            throw new Exception("Failed to prepare booking query: " . $conn->error);
+            error_log("BOOKINGS.PHP - Failed to prepare query: " . $conn->errorInfo()[2]);
+            throw new Exception("Failed to prepare booking query");
         }
         
-        $stmt->bind_param($types, ...$params);
-        $execute_result = $stmt->execute();
+        // Execute with parameters
+        $execute_result = $stmt->execute($params);
         
         if (!$execute_result) {
-            error_log("BOOKINGS.PHP - Failed to execute query: " . $stmt->error);
-            throw new Exception("Failed to execute booking query: " . $stmt->error);
+            error_log("BOOKINGS.PHP - Failed to execute query: " . $stmt->errorInfo()[2]);
+            throw new Exception("Failed to execute booking query");
         }
         
-        $result = $stmt->get_result();
+        // Fetch all results at once
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
-        // Check for errors
-        if (!$result) {
-            error_log("BOOKINGS.PHP - SQL Error in bookings query: " . $conn->error);
-            throw new Exception("SQL Error in bookings query: " . $conn->error);
-        }
-        
-        error_log("BOOKINGS.PHP - Query executed successfully, found " . $result->num_rows . " bookings");
+        error_log("BOOKINGS.PHP - Query executed successfully, found " . count($rows) . " bookings");
         
         // Fetch all bookings
         $bookings = [];
-        while ($row = $result->fetch_assoc()) {
+        foreach ($rows as $row) {
             // Get booking guests (separate query for each booking)
             $booking_id = $row['id'];
             
@@ -322,13 +315,12 @@ function handle_get_request($user) {
                 
                 $guests_stmt = $conn->prepare($guests_query);
                 if (!$guests_stmt) {
-                    error_log("BOOKINGS.PHP - Failed to prepare guests query: " . $conn->error);
+                    error_log("BOOKINGS.PHP - Failed to prepare guests query: " . $conn->errorInfo()[2]);
                 } else {
-                    $guests_stmt->bind_param("i", $booking_id);
-                    $guests_stmt->execute();
-                    $guests_result = $guests_stmt->get_result();
+                    $guests_stmt->execute([$booking_id]);
+                    $guest_rows = $guests_stmt->fetchAll(PDO::FETCH_ASSOC);
                     
-                    while ($guest_row = $guests_result->fetch_assoc()) {
+                    foreach ($guest_rows as $guest_row) {
                         $guests[] = [
                             'id' => (int)$guest_row['user_id'],
                             'firstName' => $guest_row['first_name'],
@@ -336,7 +328,6 @@ function handle_get_request($user) {
                             'email' => $guest_row['email']
                         ];
                     }
-                    $guests_stmt->close();
                 }
             } catch (Exception $e) {
                 error_log("BOOKINGS.PHP - Error fetching guests for booking ID " . $booking_id . ": " . $e->getMessage());
@@ -364,9 +355,6 @@ function handle_get_request($user) {
                 'guestList' => $guests
             ];
         }
-        
-        $stmt->close();
-        $conn->close();
         
         error_log("BOOKINGS.PHP - Successfully processed GET request, returning " . count($bookings) . " bookings");
         
@@ -438,7 +426,7 @@ function handle_post_request($user) {
         $guests = isset($data['guests']) ? $data['guests'] : [];
         
         // Begin transaction
-        $conn->begin_transaction();
+        $conn->beginTransaction();
         
         // Determine the correct column name by checking table structure
         $charterer_column = 'main_charterer_id'; // Default column name
@@ -446,13 +434,7 @@ function handle_post_request($user) {
             $describe_query = "DESCRIBE wp_charterhub_bookings";
             $describe_stmt = $conn->prepare($describe_query);
             $describe_stmt->execute();
-            $result = $describe_stmt->get_result();
-            
-            $columns = [];
-            while ($row = $result->fetch_assoc()) {
-                $columns[] = $row['Field'];
-            }
-            $describe_stmt->close();
+            $columns = $describe_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
             
             error_log("Booking table columns: " . implode(", ", $columns));
             
@@ -470,15 +452,25 @@ function handle_post_request($user) {
                                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
         
         $stmt = $conn->prepare($insert_booking_query);
-        $stmt->bind_param("isssdis", $yacht_id, $start_date, $end_date, $status, $total_price, $main_charterer_id);
+        if (!$stmt) {
+            throw new Exception("Failed to prepare booking insert: " . implode(", ", $conn->errorInfo()));
+        }
         
-        if (!$stmt->execute()) {
-            throw new Exception("Failed to create booking: " . $stmt->error);
+        $result = $stmt->execute([
+            $yacht_id, 
+            $start_date, 
+            $end_date, 
+            $status, 
+            $total_price, 
+            $main_charterer_id
+        ]);
+        
+        if (!$result) {
+            throw new Exception("Failed to create booking: " . implode(", ", $stmt->errorInfo()));
         }
         
         // Get the new booking ID
-        $booking_id = $conn->insert_id;
-        $stmt->close();
+        $booking_id = $conn->lastInsertId();
         
         // Add guests if provided
         $guest_ids = [];
@@ -489,13 +481,12 @@ function handle_post_request($user) {
             foreach ($guests as $guest) {
                 if (isset($guest['id']) && !empty($guest['id'])) {
                     $guest_id = intval($guest['id']);
-                    $guest_stmt->bind_param("ii", $booking_id, $guest_id);
-                    if (!$guest_stmt->execute()) {
-                        throw new Exception("Failed to add guest: " . $guest_stmt->error);
+                    $result = $guest_stmt->execute([$booking_id, $guest_id]);
+                    if (!$result) {
+                        throw new Exception("Failed to add guest: " . implode(", ", $guest_stmt->errorInfo()));
                     }
                 }
             }
-            $guest_stmt->close();
         }
         
         // Commit transaction
@@ -516,8 +507,8 @@ function handle_post_request($user) {
         ]);
     } catch (Exception $e) {
         // Rollback transaction on error
-        if (isset($conn) && $conn->ping()) {
-            $conn->rollback();
+        if (isset($conn) && $conn->inTransaction()) {
+            $conn->rollBack();
         }
         
         error_log("Error in client bookings POST request: " . $e->getMessage());
