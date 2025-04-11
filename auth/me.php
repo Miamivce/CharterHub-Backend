@@ -15,6 +15,71 @@ if (!defined('CHARTERHUB_LOADED')) {
 require_once dirname(__FILE__) . '/global-cors.php';
 apply_global_cors(['GET', 'OPTIONS']);
 
+// Debug endpoint for database connection check
+if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
+    header('Content-Type: application/json');
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    
+    try {
+        // Include database utilities
+        require_once dirname(__FILE__) . '/../utils/database.php';
+        
+        // Try to establish database connection
+        $conn = get_database_connection();
+        
+        if (!$conn) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'Could not establish database connection',
+                'php_version' => PHP_VERSION,
+                'server_time' => date('Y-m-d H:i:s')
+            ]);
+            exit;
+        }
+        
+        // Check if users table exists
+        $tables_result = $conn->query("SHOW TABLES LIKE 'wp_charterhub_users'");
+        $users_table_exists = ($tables_result && $tables_result->num_rows > 0);
+        
+        // Get columns if table exists
+        $user_columns = [];
+        if ($users_table_exists) {
+            $describe_result = $conn->query("DESCRIBE wp_charterhub_users");
+            if ($describe_result) {
+                while ($row = $describe_result->fetch_assoc()) {
+                    $user_columns[] = $row['Field'];
+                }
+            }
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Database connection test',
+            'php_version' => PHP_VERSION,
+            'server_time' => date('Y-m-d H:i:s'),
+            'users_table_exists' => $users_table_exists,
+            'user_columns' => $user_columns,
+            'functions_available' => [
+                'fetchRow' => function_exists('fetchRow'),
+                'fetchRows' => function_exists('fetchRows'),
+                'executeQuery' => function_exists('executeQuery')
+            ]
+        ]);
+        exit;
+    } catch (Exception $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error in database test',
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'php_version' => PHP_VERSION
+        ]);
+        exit;
+    }
+}
+
 // Include required files directly
 require_once dirname(__FILE__) . '/config.php';
 require_once dirname(__FILE__) . '/jwt-core.php';

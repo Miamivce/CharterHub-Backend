@@ -16,6 +16,66 @@ error_reporting(0); // Temporarily disable error reporting for CORS setup
 // Ensure proper JSON content type for all responses
 header('Content-Type: application/json');
 
+// Simple debug endpoint that doesn't require authentication
+if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
+    // Re-enable error display for this debug endpoint
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    
+    try {
+        // Test basic database connectivity
+        require_once __DIR__ . '/../../utils/database.php';
+        $conn = get_database_connection();
+        
+        if (!$conn) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'Failed to connect to database',
+                'php_version' => PHP_VERSION,
+                'server_time' => date('Y-m-d H:i:s')
+            ]);
+            exit;
+        }
+        
+        // Test if wp_charterhub_bookings table exists
+        $tables_result = $conn->query("SHOW TABLES LIKE 'wp_charterhub_bookings'");
+        $bookings_table_exists = ($tables_result && $tables_result->num_rows > 0);
+        
+        // Get booking table structure if it exists
+        $booking_columns = [];
+        if ($bookings_table_exists) {
+            $describe_result = $conn->query("DESCRIBE wp_charterhub_bookings");
+            if ($describe_result) {
+                while ($row = $describe_result->fetch_assoc()) {
+                    $booking_columns[] = $row['Field'];
+                }
+            }
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Database connection test',
+            'php_version' => PHP_VERSION,
+            'server_time' => date('Y-m-d H:i:s'),
+            'bookings_table_exists' => $bookings_table_exists,
+            'booking_columns' => $booking_columns,
+            'charterer_column' => in_array('main_charterer_id', $booking_columns) ? 'main_charterer_id' : 
+                                 (in_array('customer_id', $booking_columns) ? 'customer_id' : 'not_found')
+        ]);
+        exit;
+    } catch (Exception $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error in database test',
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'php_version' => PHP_VERSION
+        ]);
+        exit;
+    }
+}
+
 // Check if constant is already defined before defining it
 if (!defined('CHARTERHUB_LOADED')) {
     define('CHARTERHUB_LOADED', true);
