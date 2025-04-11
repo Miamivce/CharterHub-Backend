@@ -6,6 +6,24 @@
  * It extends the standard login.php by adding a role check.
  */
 
+// Debug mode - if parameter is set
+if (isset($_GET['debug_mode']) && $_GET['debug_mode'] === 'on') {
+    header('Content-Type: application/json');
+    echo json_encode([
+        'debug' => true,
+        'message' => 'Server is responding',
+        'php_version' => PHP_VERSION,
+        'time' => date('Y-m-d H:i:s'),
+        'server' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
+        'extensions' => [
+            'pdo' => extension_loaded('pdo'),
+            'pdo_mysql' => extension_loaded('pdo_mysql'),
+            'mysqli' => extension_loaded('mysqli')
+        ]
+    ]);
+    exit;
+}
+
 // Set error display settings (ADDED)
 ini_set('display_errors', 0);
 error_reporting(E_ERROR);
