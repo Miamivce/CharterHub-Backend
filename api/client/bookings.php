@@ -7,6 +7,8 @@
  * Supports:
  * - GET: Retrieve bookings where the authenticated user is either the main charterer or a guest
  * - POST: Create a new booking (currently empty, to be implemented)
+ * 
+ * Version: 1.1.0 - Updated with PDO connection for Render.com
  */
 
 // Prevent any output before headers and ensure proper content type
@@ -16,6 +18,56 @@ error_reporting(0); // Temporarily disable error reporting for CORS setup
 // Ensure proper JSON content type for all responses
 header('Content-Type: application/json');
 
+// Include critical dependencies early
+require_once __DIR__ . '/../../utils/database.php';
+
+/**
+ * Get a reliable database connection for bookings
+ * This function ensures we have a valid database connection with fallbacks
+ */
+function get_bookings_db_connection() {
+    try {
+        // First try the standard connection
+        return getDbConnection();
+    } catch (Exception $e) {
+        error_log("BOOKINGS.PHP - Primary database connection failed: " . $e->getMessage());
+        
+        // Try a direct connection from config
+        try {
+            require_once __DIR__ . '/../../auth/config.php';
+            return get_db_connection_from_config();
+        } catch (Exception $config_e) {
+            error_log("BOOKINGS.PHP - Config connection failed: " . $config_e->getMessage());
+            
+            // Last resort - try fallback connection from environment variables
+            try {
+                // Cloud database settings
+                $host = 'mysql-charterhub-charterhub.c.aivencloud.com';
+                $port = '19174';
+                $dbname = 'defaultdb';
+                $username = 'avnadmin';
+                $password = 'AVNS_HCZbm5bZJE1L9C8Pz8C';
+                
+                // Build DSN
+                $dsn = "mysql:host={$host};port={$port};dbname={$dbname}";
+                
+                // Enable SSL with verification disabled
+                $options = [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false
+                ];
+                
+                error_log("BOOKINGS.PHP - Attempting emergency fallback connection");
+                return new PDO($dsn, $username, $password, $options);
+            } catch (Exception $fallback_e) {
+                error_log("BOOKINGS.PHP - All database connection attempts failed");
+                throw new Exception("Failed to establish any database connection");
+            }
+        }
+    }
+}
+
 // Simple debug endpoint that doesn't require authentication
 if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
     // Re-enable error display for this debug endpoint
@@ -23,9 +75,8 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
     ini_set('display_errors', 1);
     
     try {
-        // Test basic database connectivity
-        require_once __DIR__ . '/../../utils/database.php';
-        $conn = getDbConnection();
+        // Test basic database connectivity using the new connection function
+        $conn = get_bookings_db_connection();
         
         if (!$conn) {
             echo json_encode([
@@ -60,7 +111,8 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
             'bookings_table_exists' => $bookings_table_exists,
             'booking_columns' => $booking_columns,
             'charterer_column' => in_array('main_charterer_id', $booking_columns) ? 'main_charterer_id' : 
-                                 (in_array('customer_id', $booking_columns) ? 'customer_id' : 'not_found')
+                                 (in_array('customer_id', $booking_columns) ? 'customer_id' : 'not_found'),
+            'connection_type' => 'Direct PDO connection with fallback'
         ]);
         exit;
     } catch (Exception $e) {
@@ -172,8 +224,8 @@ function handle_get_request($user) {
     try {
         error_log("BOOKINGS.PHP - Starting GET request handler for user ID: " . $user['id']);
         
-        // Using the database connection function from jwt-auth.php
-        $conn = get_database_connection();
+        // Using our direct connection function with fallbacks
+        $conn = get_bookings_db_connection();
         if (!$conn) {
             error_log("BOOKINGS.PHP - Failed to get database connection");
             throw new Exception("Database connection failed");
@@ -398,8 +450,8 @@ function handle_get_request($user) {
  */
 function handle_post_request($user) {
     try {
-        // Get database connection using the function from jwt-auth.php
-        $conn = get_database_connection();
+        // Get database connection using our reliable connection function
+        $conn = get_bookings_db_connection();
         
         // Parse request body
         $data = json_decode(file_get_contents('php://input'), true);

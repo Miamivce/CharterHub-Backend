@@ -3,10 +3,14 @@
  * JWT Authentication Helper
  * 
  * This file provides JWT authentication functions for API endpoints
+ * Version: 1.1.0 - Updated with PDO connection for Render.com
  */
 
 // Include core JWT functionality
 require_once __DIR__ . '/jwt-core.php';
+
+// Ensure database utilities are included
+require_once __DIR__ . '/../utils/database.php';
 
 /**
  * Verify JWT token from Authorization header
@@ -88,22 +92,22 @@ function json_response($data, $status = 200) {
 }
 
 /**
- * Get database connection
+ * Get database connection - Updated for cloud deployment
  * 
- * @return mysqli|PDO Database connection
+ * @return PDO Database connection
  */
 function get_database_connection() {
-    // Use the database utilities that are working in the application
-    require_once dirname(__FILE__) . '/../utils/database.php';
-    
     try {
-        // Use the working PDO connection
-        return getDbConnection();
+        // Call the getDbConnection function directly
+        error_log("JWT-AUTH: Creating database connection using utils/database.php");
+        $conn = getDbConnection();
+        error_log("JWT-AUTH: Database connection created successfully");
+        return $conn;
     } catch (Exception $e) {
-        error_log("Database connection failed in jwt-auth.php: " . $e->getMessage());
+        error_log("JWT-AUTH: Database connection failed: " . $e->getMessage());
         json_response([
             'success' => false,
-            'message' => 'Database connection error'
+            'message' => 'Database connection error: ' . $e->getMessage()
         ], 500);
         exit;
     }
