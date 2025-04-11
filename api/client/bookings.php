@@ -8,12 +8,59 @@
  * - GET: Retrieve bookings where the authenticated user is either the main charterer or a guest
  * - POST: Create a new booking (currently empty, to be implemented)
  * 
- * Version: 1.1.0 - Updated with PDO connection for Render.com
+ * Version: 1.1.1 - Added output buffering for clean JSON responses
  */
+
+// Start output buffering to capture errors
+ob_start();
 
 // Prevent any output before headers and ensure proper content type
 @ini_set('display_errors', 0);
 error_reporting(0); // Temporarily disable error reporting for CORS setup
+
+// Set error handler to catch any errors and convert to JSON
+function json_error_handler($severity, $message, $file, $line) {
+    // Log the error
+    error_log("PHP Error [$severity]: $message in $file on line $line");
+    
+    // Clear the output buffer
+    ob_clean();
+    
+    // Return JSON error
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => false,
+        'message' => 'Server error occurred',
+        'error' => 'internal_error',
+        'details' => "[$severity]: $message in $file on line $line"
+    ]);
+    exit;
+}
+
+// Register the custom error handler
+set_error_handler('json_error_handler', E_ALL);
+
+// Set exception handler
+function json_exception_handler($exception) {
+    // Log the exception
+    error_log("Unhandled Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine());
+    
+    // Clear the output buffer
+    ob_clean();
+    
+    // Return JSON error
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => false,
+        'message' => 'Server exception occurred',
+        'error' => 'internal_exception',
+        'details' => $exception->getMessage()
+    ]);
+    exit;
+}
+
+// Register the custom exception handler
+set_exception_handler('json_exception_handler');
 
 // Ensure proper JSON content type for all responses
 header('Content-Type: application/json');
@@ -79,13 +126,12 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
         $conn = get_bookings_db_connection();
         
         if (!$conn) {
-            echo json_encode([
+            json_response([
                 'success' => false,
                 'message' => 'Failed to connect to database',
                 'php_version' => PHP_VERSION,
                 'server_time' => date('Y-m-d H:i:s')
-            ]);
-            exit;
+            ], 500);
         }
         
         // Test if wp_charterhub_bookings table exists
@@ -103,7 +149,7 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
             }
         }
         
-        echo json_encode([
+        json_response([
             'success' => true,
             'message' => 'Database connection test',
             'php_version' => PHP_VERSION,
@@ -112,19 +158,19 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
             'booking_columns' => $booking_columns,
             'charterer_column' => in_array('main_charterer_id', $booking_columns) ? 'main_charterer_id' : 
                                  (in_array('customer_id', $booking_columns) ? 'customer_id' : 'not_found'),
-            'connection_type' => 'Direct PDO connection with fallback'
+            'connection_type' => 'Direct PDO connection with fallback',
+            'buffer_level' => ob_get_level()
         ]);
-        exit;
     } catch (Exception $e) {
-        echo json_encode([
+        json_response([
             'success' => false,
             'message' => 'Error in database test',
             'error' => $e->getMessage(),
             'file' => $e->getFile(),
             'line' => $e->getLine(),
-            'php_version' => PHP_VERSION
-        ]);
-        exit;
+            'php_version' => PHP_VERSION,
+            'trace' => $e->getTraceAsString()
+        ], 500);
     }
 }
 
@@ -570,6 +616,61 @@ function handle_post_request($user) {
             'error' => 'database_error'
         ], 500);
     }
+}
+
+/**
+ * Send JSON response
+ * 
+ * @param array $data Response data
+ * @param int $status HTTP status code
+ */
+function json_response($data, $status = 200) {
+    // Clear any existing output
+    if (ob_get_level()) {
+        ob_clean();
+    }
+    
+    // Set headers
+    header('Content-Type: application/json');
+    http_response_code($status);
+    
+    // Handle JSON encoding errors
+    try {
+        // Encode data with error handling
+        $json = json_encode($data, JSON_PRETTY_PRINT);
+        
+        // Check for JSON encoding errors
+        if ($json === false) {
+            $json_error = json_last_error_msg();
+            error_log("JSON encoding error: " . $json_error);
+            
+            // Provide a sanitized response
+            echo json_encode([
+                'success' => false,
+                'message' => 'Error encoding response',
+                'error' => 'json_encode_error',
+                'error_message' => $json_error
+            ], JSON_PRETTY_PRINT);
+        } else {
+            // Output successful JSON
+            echo $json;
+        }
+    } catch (Exception $e) {
+        // Fallback for any other errors
+        error_log("Exception in json_response: " . $e->getMessage());
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error while generating response',
+            'error' => 'response_generation_error'
+        ], JSON_PRETTY_PRINT);
+    }
+    
+    // End output buffering
+    if (ob_get_level()) {
+        ob_end_flush();
+    }
+    
+    exit;
 }
 
 // We're using the get_database_connection function from jwt-auth.php
