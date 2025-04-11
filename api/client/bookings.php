@@ -8,65 +8,77 @@
  * - GET: Retrieve bookings where the authenticated user is either the main charterer or a guest
  * - POST: Create a new booking (currently empty, to be implemented)
  * 
- * Version: 1.1.1 - Added output buffering for clean JSON responses
+ * Version: 1.1.3 - Fixed strict content-type and HTML prevention
  */
 
-// Start output buffering to capture errors
+// Force JSON response type - even before anything else
+header('Content-Type: application/json');
+
+// Prevent any PHP errors from being displayed directly
+@ini_set('display_errors', 0);
+error_reporting(0);
+
+// Start output buffering
 ob_start();
 
-// Prevent any output before headers and ensure proper content type
-@ini_set('display_errors', 0);
-error_reporting(0); // Temporarily disable error reporting for CORS setup
+// Define the CHARTERHUB_LOADED constant
+if (!defined('CHARTERHUB_LOADED')) {
+    define('CHARTERHUB_LOADED', true);
+}
 
-// Set error handler to catch any errors and convert to JSON
-function json_error_handler($severity, $message, $file, $line) {
-    // Log the error
-    error_log("PHP Error [$severity]: $message in $file on line $line");
-    
-    // Clear the output buffer
+// Include only essential dependencies first
+require_once __DIR__ . '/../../auth/global-cors.php';
+
+// Apply CORS headers with proper cleaning
+if (ob_get_length()) {
     ob_clean();
-    
-    // Return JSON error
-    header('Content-Type: application/json');
+}
+
+// Apply CORS headers for all supported methods
+if (!apply_cors_headers(['GET', 'POST', 'OPTIONS'])) {
+    ob_clean();
     echo json_encode([
         'success' => false,
-        'message' => 'Server error occurred',
-        'error' => 'internal_error',
-        'details' => "[$severity]: $message in $file on line $line"
+        'message' => 'CORS error',
+        'error' => 'cors_error'
     ]);
     exit;
 }
 
-// Register the custom error handler
-set_error_handler('json_error_handler', E_ALL);
-
-// Set exception handler
-function json_exception_handler($exception) {
-    // Log the exception
-    error_log("Unhandled Exception: " . $exception->getMessage() . " in " . $exception->getFile() . " on line " . $exception->getLine());
-    
-    // Clear the output buffer
+// Handle OPTIONS preflight immediately
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     ob_clean();
-    
-    // Return JSON error
-    header('Content-Type: application/json');
+    echo json_encode(['success' => true, 'message' => 'CORS preflight successful']);
+    exit;
+}
+
+// Now we can include other dependencies
+require_once __DIR__ . '/../../utils/database.php';
+require_once __DIR__ . '/../../auth/jwt-auth.php';
+
+// Set custom error handler to force JSON responses
+set_error_handler(function($severity, $message, $file, $line) {
+    ob_clean();
     echo json_encode([
         'success' => false,
-        'message' => 'Server exception occurred',
-        'error' => 'internal_exception',
+        'message' => 'Server error',
+        'error' => 'php_error',
+        'details' => "$message in $file on line $line"
+    ]);
+    exit;
+}, E_ALL);
+
+// Set exception handler
+set_exception_handler(function($exception) {
+    ob_clean();
+    echo json_encode([
+        'success' => false,
+        'message' => 'Server exception',
+        'error' => 'exception',
         'details' => $exception->getMessage()
     ]);
     exit;
-}
-
-// Register the custom exception handler
-set_exception_handler('json_exception_handler');
-
-// Ensure proper JSON content type for all responses
-header('Content-Type: application/json');
-
-// Include critical dependencies early
-require_once __DIR__ . '/../../utils/database.php';
+});
 
 /**
  * Get a reliable database connection for bookings
@@ -174,37 +186,6 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
     }
 }
 
-// Check if constant is already defined before defining it
-if (!defined('CHARTERHUB_LOADED')) {
-    define('CHARTERHUB_LOADED', true);
-}
-
-// Include necessary files
-require_once __DIR__ . '/../../auth/global-cors.php';
-
-// Apply CORS headers BEFORE any other operation
-// Include OPTIONS method to support preflight requests
-if (!apply_cors_headers(['GET', 'POST', 'OPTIONS'])) {
-    exit; // Exit if CORS headers could not be sent
-}
-
-// Handle OPTIONS requests immediately for CORS preflight
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit; // The apply_cors_headers function already handles this, but just to be sure
-}
-
-// Re-enable error reporting now that CORS headers are sent
-error_reporting(E_ALL);
-@ini_set('display_errors', 1);
-
-// Set log error details
-ini_set('log_errors', 1);
-error_log("DIAGNOSTICS - PHP Version: " . PHP_VERSION);
-error_log("DIAGNOSTICS - Using updated code with column detection (v2)");
-
-// Now include JWT auth after CORS headers are sent
-require_once __DIR__ . '/../../auth/jwt-auth.php';
-
 // Initialize response
 $response = [
     'success' => false,
@@ -270,6 +251,13 @@ function handle_get_request($user) {
     try {
         error_log("BOOKINGS.PHP - Starting GET request handler for user ID: " . $user['id']);
         
+        // Check if we have unexpected output before any database operations
+        $unexpected_output = ob_get_contents();
+        if (!empty($unexpected_output)) {
+            error_log("BOOKINGS.PHP - Unexpected output before database operations: " . $unexpected_output);
+            ob_clean();
+        }
+        
         // Using our direct connection function with fallbacks
         $conn = get_bookings_db_connection();
         if (!$conn) {
@@ -277,6 +265,13 @@ function handle_get_request($user) {
             throw new Exception("Database connection failed");
         }
         error_log("BOOKINGS.PHP - Database connection established");
+        
+        // Check again for unexpected output after database connection
+        $unexpected_output = ob_get_contents();
+        if (!empty($unexpected_output)) {
+            error_log("BOOKINGS.PHP - Unexpected output after database connection: " . $unexpected_output);
+            ob_clean();
+        }
         
         // Get user ID from authenticated token
         $user_id = $user['id'];

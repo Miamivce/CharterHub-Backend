@@ -85,9 +85,46 @@ function is_admin_user($user) {
  * @param int $status HTTP status code
  */
 function json_response($data, $status = 200) {
+    // Clear any existing output buffer
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    // Set headers
     header('Content-Type: application/json');
     http_response_code($status);
-    echo json_encode($data);
+    
+    // Handle JSON encoding errors
+    try {
+        // Encode data with error handling
+        $json = json_encode($data, JSON_PRETTY_PRINT);
+        
+        // Check for JSON encoding errors
+        if ($json === false) {
+            $json_error = json_last_error_msg();
+            error_log("JSON encoding error: " . $json_error);
+            
+            // Provide a sanitized response
+            echo json_encode([
+                'success' => false,
+                'message' => 'Error encoding response',
+                'error' => 'json_encode_error',
+                'error_message' => $json_error
+            ], JSON_PRETTY_PRINT);
+        } else {
+            // Output successful JSON
+            echo $json;
+        }
+    } catch (Exception $e) {
+        // Fallback for any other errors
+        error_log("Exception in json_response: " . $e->getMessage());
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error while generating response',
+            'error' => 'response_generation_error'
+        ], JSON_PRETTY_PRINT);
+    }
+    
     exit;
 }
 
