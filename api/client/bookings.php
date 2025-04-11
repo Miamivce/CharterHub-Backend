@@ -25,7 +25,7 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
     try {
         // Test basic database connectivity
         require_once __DIR__ . '/../../utils/database.php';
-        $conn = get_database_connection();
+        $conn = getDbConnection();
         
         if (!$conn) {
             echo json_encode([
@@ -39,14 +39,14 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
         
         // Test if wp_charterhub_bookings table exists
         $tables_result = $conn->query("SHOW TABLES LIKE 'wp_charterhub_bookings'");
-        $bookings_table_exists = ($tables_result && $tables_result->num_rows > 0);
+        $bookings_table_exists = ($tables_result && $tables_result->rowCount() > 0);
         
         // Get booking table structure if it exists
         $booking_columns = [];
         if ($bookings_table_exists) {
             $describe_result = $conn->query("DESCRIBE wp_charterhub_bookings");
             if ($describe_result) {
-                while ($row = $describe_result->fetch_assoc()) {
+                while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
                     $booking_columns[] = $row['Field'];
                 }
             }
