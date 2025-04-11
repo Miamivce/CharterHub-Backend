@@ -146,30 +146,58 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
             ], 500);
         }
         
-        // Test if wp_charterhub_bookings table exists
-        $tables_result = $conn->query("SHOW TABLES LIKE 'wp_charterhub_bookings'");
-        $bookings_table_exists = ($tables_result && $tables_result->rowCount() > 0);
+        // Look for tables with or without prefix
+        $tables = [];
+        $tables_result = $conn->query("SHOW TABLES");
         
-        // Get booking table structure if it exists
-        $booking_columns = [];
-        if ($bookings_table_exists) {
-            $describe_result = $conn->query("DESCRIBE wp_charterhub_bookings");
-            if ($describe_result) {
-                while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
-                    $booking_columns[] = $row['Field'];
-                }
+        if ($tables_result) {
+            while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
+                $tables[] = $row[0];
             }
         }
+        
+        // Find bookings table
+        $bookings_table = null;
+        foreach ($tables as $table) {
+            if (stripos($table, 'charterhub_bookings') !== false) {
+                $bookings_table = $table;
+                break;
+            }
+        }
+        
+        if (!$bookings_table) {
+            json_response([
+                'success' => false,
+                'message' => 'Bookings table not found',
+                'tables_found' => $tables,
+                'php_version' => PHP_VERSION,
+                'server_time' => date('Y-m-d H:i:s')
+            ], 404);
+        }
+        
+        // Get booking table structure
+        $booking_columns = [];
+        $describe_result = $conn->query("DESCRIBE " . $bookings_table);
+        
+        if ($describe_result) {
+            while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
+                $booking_columns[] = $row['Field'];
+            }
+        }
+        
+        // Determine charterer column
+        $charterer_column = in_array('main_charterer_id', $booking_columns) ? 'main_charterer_id' : 
+                          (in_array('customer_id', $booking_columns) ? 'customer_id' : 'not_found');
         
         json_response([
             'success' => true,
             'message' => 'Database connection test',
             'php_version' => PHP_VERSION,
             'server_time' => date('Y-m-d H:i:s'),
-            'bookings_table_exists' => $bookings_table_exists,
+            'tables_found' => $tables,
+            'bookings_table' => $bookings_table,
             'booking_columns' => $booking_columns,
-            'charterer_column' => in_array('main_charterer_id', $booking_columns) ? 'main_charterer_id' : 
-                                 (in_array('customer_id', $booking_columns) ? 'customer_id' : 'not_found'),
+            'charterer_column' => $charterer_column,
             'connection_type' => 'Direct PDO connection with fallback',
             'buffer_level' => ob_get_level()
         ]);
@@ -285,7 +313,7 @@ function handle_get_request($user) {
         
         try {
             // First, check if the bookings table exists
-            $tables_query = "SHOW TABLES LIKE 'wp_charterhub_bookings'";
+            $tables_query = "SHOW TABLES";
             $tables_result = $conn->query($tables_query);
             
             if (!$tables_result) {
@@ -293,16 +321,29 @@ function handle_get_request($user) {
                 throw new Exception("Error checking database tables");
             }
             
-            $table_exists = ($tables_result->rowCount() > 0);
-            error_log("BOOKINGS.PHP - Bookings table exists: " . ($table_exists ? "YES" : "NO"));
+            // Look for bookings table with or without prefix
+            $bookings_table = 'wp_charterhub_bookings'; // Default with prefix
+            $table_exists = false;
+            
+            while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
+                $table_name = $row[0];
+                error_log("BOOKINGS.PHP - Found table: " . $table_name);
+                
+                if ($table_name === 'wp_charterhub_bookings' || $table_name === 'charterhub_bookings') {
+                    $bookings_table = $table_name;
+                    $table_exists = true;
+                    error_log("BOOKINGS.PHP - Found bookings table: " . $bookings_table);
+                    break;
+                }
+            }
             
             if (!$table_exists) {
-                error_log("BOOKINGS.PHP - wp_charterhub_bookings table not found");
+                error_log("BOOKINGS.PHP - No bookings table found in database");
                 throw new Exception("Bookings table not found in database");
             }
             
             // Check table columns
-            $describe_query = "DESCRIBE wp_charterhub_bookings";
+            $describe_query = "DESCRIBE " . $bookings_table;
             $describe_result = $conn->query($describe_query);
             
             if (!$describe_result) {
@@ -327,9 +368,46 @@ function handle_get_request($user) {
                 error_log("BOOKINGS.PHP - Neither main_charterer_id nor customer_id found, columns available: " . implode(", ", $columns));
                 throw new Exception("Required column not found in bookings table");
             }
+            
+            // Also determine proper yachts table name
+            $yachts_table = 'wp_charterhub_yachts'; // Default
+            $yachts_query = "SHOW TABLES LIKE '%charterhub_yachts'";
+            $yachts_result = $conn->query($yachts_query);
+            
+            if ($yachts_result && $yachts_result->rowCount() > 0) {
+                $yacht_row = $yachts_result->fetch(PDO::FETCH_NUM);
+                $yachts_table = $yacht_row[0];
+                error_log("BOOKINGS.PHP - Found yachts table: " . $yachts_table);
+            }
+            
+            // Determine proper users table name
+            $users_table = 'wp_charterhub_users'; // Default
+            $users_query = "SHOW TABLES LIKE '%charterhub_users'";
+            $users_result = $conn->query($users_query);
+            
+            if ($users_result && $users_result->rowCount() > 0) {
+                $user_row = $users_result->fetch(PDO::FETCH_NUM);
+                $users_table = $user_row[0];
+                error_log("BOOKINGS.PHP - Found users table: " . $users_table);
+            }
+            
+            // Determine proper booking_guests table name
+            $guests_table = 'wp_charterhub_booking_guests'; // Default
+            $guests_query = "SHOW TABLES LIKE '%charterhub_booking_guests'";
+            $guests_result = $conn->query($guests_query);
+            
+            if ($guests_result && $guests_result->rowCount() > 0) {
+                $guest_row = $guests_result->fetch(PDO::FETCH_NUM);
+                $guests_table = $guest_row[0];
+                error_log("BOOKINGS.PHP - Found booking guests table: " . $guests_table);
+            }
         } catch (Exception $e) {
-            error_log("BOOKINGS.PHP - Error determining column name: " . $e->getMessage());
-            // We'll try to continue with the default column name
+            error_log("BOOKINGS.PHP - Error determining table structure: " . $e->getMessage());
+            // We'll try to continue with default table names
+            $bookings_table = 'wp_charterhub_bookings';
+            $yachts_table = 'wp_charterhub_yachts';
+            $users_table = 'wp_charterhub_users';
+            $guests_table = 'wp_charterhub_booking_guests';
         }
         
         error_log("BOOKINGS.PHP - Using charterer column: " . $charterer_column);
@@ -348,11 +426,11 @@ function handle_get_request($user) {
                     u_main.last_name as main_charterer_last_name,
                     u_main.email as main_charterer_email,
                     b.created_at
-                  FROM wp_charterhub_bookings b
-                  LEFT JOIN wp_charterhub_yachts y ON b.yacht_id = y.id
-                  LEFT JOIN wp_charterhub_users u_main ON b.{$charterer_column} = u_main.id
+                  FROM " . $bookings_table . " b
+                  LEFT JOIN " . $yachts_table . " y ON b.yacht_id = y.id
+                  LEFT JOIN " . $users_table . " u_main ON b.{$charterer_column} = u_main.id
                   WHERE (b.{$charterer_column} = ? OR 
-                        b.id IN (SELECT booking_id FROM wp_charterhub_booking_guests WHERE user_id = ?))";
+                        b.id IN (SELECT booking_id FROM " . $guests_table . " WHERE user_id = ?))";
         
         $params = [$user_id, $user_id];
         
@@ -402,8 +480,8 @@ function handle_get_request($user) {
                                     u.first_name,
                                     u.last_name,
                                     u.email
-                                FROM wp_charterhub_booking_guests bg
-                                LEFT JOIN wp_charterhub_users u ON bg.user_id = u.id
+                                FROM " . $guests_table . " bg
+                                LEFT JOIN " . $users_table . " u ON bg.user_id = u.id
                                 WHERE bg.booking_id = ?";
                 
                 $guests_stmt = $conn->prepare($guests_query);
@@ -494,6 +572,35 @@ function handle_post_request($user) {
         // Get database connection using our reliable connection function
         $conn = get_bookings_db_connection();
         
+        // Determine table names
+        $bookings_table = 'wp_charterhub_bookings';
+        $guests_table = 'wp_charterhub_booking_guests';
+        
+        try {
+            // Look for bookings table with or without prefix
+            $tables_query = "SHOW TABLES";
+            $tables_result = $conn->query($tables_query);
+            
+            if ($tables_result) {
+                while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
+                    $table_name = $row[0];
+                    
+                    if (stripos($table_name, 'charterhub_bookings') !== false) {
+                        $bookings_table = $table_name;
+                        error_log("BOOKINGS POST - Found bookings table: " . $bookings_table);
+                    }
+                    
+                    if (stripos($table_name, 'charterhub_booking_guests') !== false) {
+                        $guests_table = $table_name;
+                        error_log("BOOKINGS POST - Found booking guests table: " . $guests_table);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            error_log("BOOKINGS POST - Error finding tables: " . $e->getMessage());
+            // Continue with defaults
+        }
+        
         // Parse request body
         $data = json_decode(file_get_contents('php://input'), true);
         if (!$data) {
@@ -524,7 +631,7 @@ function handle_post_request($user) {
         // Determine the correct column name by checking table structure
         $charterer_column = 'main_charterer_id'; // Default column name
         try {
-            $describe_query = "DESCRIBE wp_charterhub_bookings";
+            $describe_query = "DESCRIBE " . $bookings_table;
             $describe_stmt = $conn->prepare($describe_query);
             $describe_stmt->execute();
             $columns = $describe_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
@@ -540,7 +647,7 @@ function handle_post_request($user) {
         }
         
         // Insert booking record using the correct column name
-        $insert_booking_query = "INSERT INTO wp_charterhub_bookings 
+        $insert_booking_query = "INSERT INTO " . $bookings_table . " 
                                (yacht_id, start_date, end_date, status, total_price, {$charterer_column}, created_at, updated_at) 
                                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
         
@@ -568,7 +675,7 @@ function handle_post_request($user) {
         // Add guests if provided
         $guest_ids = [];
         if (!empty($guests)) {
-            $insert_guest_query = "INSERT INTO wp_charterhub_booking_guests (booking_id, user_id, created_at) VALUES (?, ?, NOW())";
+            $insert_guest_query = "INSERT INTO " . $guests_table . " (booking_id, user_id, created_at) VALUES (?, ?, NOW())";
             $guest_stmt = $conn->prepare($insert_guest_query);
             
             foreach ($guests as $guest) {
@@ -608,7 +715,8 @@ function handle_post_request($user) {
         json_response([
             'success' => false,
             'message' => 'Error creating booking',
-            'error' => 'database_error'
+            'error' => 'database_error',
+            'details' => $e->getMessage()
         ], 500);
     }
 }
