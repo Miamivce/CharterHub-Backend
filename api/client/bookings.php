@@ -114,6 +114,30 @@ function handle_get_request($user) {
         // Get specific booking if ID is provided
         $booking_id = isset($_GET['id']) ? intval($_GET['id']) : null;
         
+        // Determine the correct column name by checking table structure
+        $charterer_column = 'main_charterer_id'; // Default column name
+        try {
+            $describe_query = "DESCRIBE wp_charterhub_bookings";
+            $describe_stmt = $conn->prepare($describe_query);
+            $describe_stmt->execute();
+            $result = $describe_stmt->get_result();
+            
+            $columns = [];
+            while ($row = $result->fetch_assoc()) {
+                $columns[] = $row['Field'];
+            }
+            $describe_stmt->close();
+            
+            error_log("Booking table columns: " . implode(", ", $columns));
+            
+            // Check if main_charterer_id or customer_id is used
+            $charterer_column = in_array('main_charterer_id', $columns) ? 'main_charterer_id' : 'customer_id';
+            error_log("Using charterer column: " . $charterer_column);
+        } catch (Exception $e) {
+            error_log("Error determining column name, using default: " . $e->getMessage());
+            // Continue with default column name
+        }
+        
         // Base query to get bookings where user is main charterer or guest
         $query = "SELECT 
                     b.id,
@@ -123,15 +147,15 @@ function handle_get_request($user) {
                     b.end_date,
                     b.status,
                     b.total_price,
-                    b.main_charterer_id,
+                    b.{$charterer_column},
                     u_main.first_name as main_charterer_first_name,
                     u_main.last_name as main_charterer_last_name,
                     u_main.email as main_charterer_email,
                     b.created_at
                   FROM wp_charterhub_bookings b
                   LEFT JOIN wp_charterhub_yachts y ON b.yacht_id = y.id
-                  LEFT JOIN wp_charterhub_users u_main ON b.main_charterer_id = u_main.id
-                  WHERE (b.main_charterer_id = ? OR 
+                  LEFT JOIN wp_charterhub_users u_main ON b.{$charterer_column} = u_main.id
+                  WHERE (b.{$charterer_column} = ? OR 
                         b.id IN (SELECT booking_id FROM wp_charterhub_booking_guests WHERE user_id = ?))";
         
         $params = [$user_id, $user_id];
@@ -210,7 +234,7 @@ function handle_get_request($user) {
                     'name' => $row['yacht_name']
                 ],
                 'mainCharterer' => [
-                    'id' => (int)$row['main_charterer_id'],
+                    'id' => (int)$row[$charterer_column],
                     'firstName' => $row['main_charterer_first_name'],
                     'lastName' => $row['main_charterer_last_name'],
                     'email' => $row['main_charterer_email']
@@ -283,10 +307,34 @@ function handle_post_request($user) {
         // Begin transaction
         $conn->begin_transaction();
         
-        // Insert booking record
+        // Determine the correct column name by checking table structure
+        $charterer_column = 'main_charterer_id'; // Default column name
+        try {
+            $describe_query = "DESCRIBE wp_charterhub_bookings";
+            $describe_stmt = $conn->prepare($describe_query);
+            $describe_stmt->execute();
+            $result = $describe_stmt->get_result();
+            
+            $columns = [];
+            while ($row = $result->fetch_assoc()) {
+                $columns[] = $row['Field'];
+            }
+            $describe_stmt->close();
+            
+            error_log("Booking table columns: " . implode(", ", $columns));
+            
+            // Check if main_charterer_id or customer_id is used
+            $charterer_column = in_array('main_charterer_id', $columns) ? 'main_charterer_id' : 'customer_id';
+            error_log("Using charterer column: " . $charterer_column);
+        } catch (Exception $e) {
+            error_log("Error determining column name, using default: " . $e->getMessage());
+            // Continue with default column name
+        }
+        
+        // Insert booking record using the correct column name
         $insert_booking_query = "INSERT INTO wp_charterhub_bookings 
-                                (yacht_id, start_date, end_date, status, total_price, main_charterer_id, created_at, updated_at) 
-                                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                               (yacht_id, start_date, end_date, status, total_price, {$charterer_column}, created_at, updated_at) 
+                               VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
         
         $stmt = $conn->prepare($insert_booking_query);
         $stmt->bind_param("isssdis", $yacht_id, $start_date, $end_date, $status, $total_price, $main_charterer_id);
@@ -300,6 +348,7 @@ function handle_post_request($user) {
         $stmt->close();
         
         // Add guests if provided
+        $guest_ids = [];
         if (!empty($guests)) {
             $insert_guest_query = "INSERT INTO wp_charterhub_booking_guests (booking_id, user_id, created_at) VALUES (?, ?, NOW())";
             $guest_stmt = $conn->prepare($insert_guest_query);
@@ -319,36 +368,31 @@ function handle_post_request($user) {
         // Commit transaction
         $conn->commit();
         
-        // Return success response with new booking ID
+        // Return success response
         json_response([
             'success' => true,
             'message' => 'Booking created successfully',
             'data' => [
                 'id' => $booking_id,
-                'yachtId' => $yacht_id,
                 'startDate' => $start_date,
                 'endDate' => $end_date,
                 'status' => $status,
                 'totalPrice' => $total_price,
-                'mainChartererId' => $main_charterer_id,
-                'createdAt' => date('Y-m-d H:i:s')
+                'yacht_id' => $yacht_id
             ]
         ]);
-        
     } catch (Exception $e) {
         // Rollback transaction on error
         if (isset($conn) && $conn->ping()) {
             $conn->rollback();
         }
         
-        // Log error details
-        error_log("Booking creation error: " . $e->getMessage());
-        
-        // Return error response
+        error_log("Error in client bookings POST request: " . $e->getMessage());
         json_response([
             'success' => false,
-            'message' => 'Failed to create booking: ' . $e->getMessage()
-        ], 400);
+            'message' => 'Error creating booking',
+            'error' => 'database_error'
+        ], 500);
     }
 }
 

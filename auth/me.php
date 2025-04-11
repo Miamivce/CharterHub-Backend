@@ -146,13 +146,32 @@ try {
             // Then separately get the bookings count
             $bookings_count = 0; // Default value
             try {
+                // Determine the correct column name first
+                $charterer_column = 'main_charterer_id'; // Default
+                try {
+                    // Check table structure to determine the correct column name
+                    $describe_result = fetchRows("DESCRIBE wp_charterhub_bookings");
+                    if ($describe_result) {
+                        $columns = array_column($describe_result, 'Field');
+                        error_log("Booking table columns: " . implode(", ", $columns));
+                        
+                        // Check if main_charterer_id or customer_id is used
+                        $charterer_column = in_array('main_charterer_id', $columns) ? 'main_charterer_id' : 'customer_id';
+                        error_log("Using charterer column: " . $charterer_column);
+                    }
+                } catch (Exception $col_e) {
+                    error_log("Error determining column name, using default: " . $col_e->getMessage());
+                    // Continue with default column name
+                }
+                
+                // Use the determined column name in the query
                 $booking_result = fetchRow("
                     SELECT 
                         COUNT(id) AS bookings_count
                     FROM 
                         wp_charterhub_bookings
                     WHERE 
-                        main_charterer_id = ?
+                        $charterer_column = ?
                 ", [(int)$user['id']]);
                 
                 if ($booking_result && isset($booking_result['bookings_count'])) {
