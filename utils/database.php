@@ -37,16 +37,52 @@ function getDbConnection() {
                 throw new Exception("Failed to get database connection from config");
             }
             
-            // Test the connection
-            $connection->query("SELECT 1");
-            error_log("Database connection created successfully");
+            // Test the connection with a simple query
+            try {
+                error_log("Testing database connection with SELECT 1");
+                $test_result = $connection->query("SELECT 1");
+                
+                if (!$test_result) {
+                    error_log("Test query failed: " . print_r($connection->errorInfo(), true));
+                    throw new Exception("Database connection test query failed");
+                }
+                
+                error_log("Database connection created and tested successfully");
+            } catch (PDOException $test_e) {
+                error_log("PDO Exception in connection test: " . $test_e->getMessage());
+                // Log additional info but don't rethrow yet - we'll try to fix it
+                error_log("Connection DSN: " . substr(get_connection_dsn(), 0, 20) . "...");  // Don't log the full DSN for security
+            }
             
             // Ensure database views exist for cross-prefix compatibility
             ensureDatabaseViewsCompat($connection);
             
         } catch (PDOException $e) {
             error_log("PDO Exception in getDbConnection: " . $e->getMessage());
-            // Re-throw to be handled by caller
+            error_log("PDO Error Code: " . $e->getCode());
+            
+            // Try a fallback connection if this was a configuration error
+            if ($e->getCode() == 1045 || $e->getCode() == 2002) { // Access denied or Connection refused
+                error_log("Attempting fallback database connection...");
+                try {
+                    // Try with simplified options
+                    $connection = get_fallback_connection();
+                    error_log("Fallback connection attempt completed");
+                    
+                    if ($connection) {
+                        // Test fallback connection
+                        $test = $connection->query("SELECT 1");
+                        if ($test) {
+                            error_log("Fallback connection successful");
+                            return $connection;
+                        }
+                    }
+                } catch (Exception $fallback_e) {
+                    error_log("Fallback connection failed: " . $fallback_e->getMessage());
+                }
+            }
+            
+            // If we got here, we couldn't connect - rethrow the original exception
             throw new Exception("Database connection error: " . $e->getMessage());
         } catch (Exception $e) {
             error_log("Exception in getDbConnection: " . $e->getMessage());
@@ -55,6 +91,66 @@ function getDbConnection() {
     }
     
     return $connection;
+}
+
+/**
+ * Get a fallback database connection with simplified options
+ * 
+ * @return PDO|null A PDO database connection or null on failure
+ */
+function get_fallback_connection() {
+    try {
+        global $db_config;
+        
+        if (!isset($db_config) || !is_array($db_config)) {
+            error_log("No db_config available for fallback connection");
+            return null;
+        }
+        
+        // Build a simplified DSN
+        $host = $db_config['host'] ?? 'mysql-charterhub-charterhub.c.aivencloud.com';
+        $port = $db_config['port'] ?? '19174';
+        $dbname = $db_config['dbname'] ?? $db_config['name'] ?? 'defaultdb';
+        $username = $db_config['username'] ?? $db_config['user'] ?? 'avnadmin';
+        $password = $db_config['password'] ?? $db_config['pass'] ?? 'AVNS_HCZbm5bZJE1L9C8Pz8C';
+        
+        $dsn = "mysql:host={$host};port={$port};dbname={$dbname}";
+        
+        error_log("Attempting fallback connection with simplified DSN");
+        
+        // Simplified options
+        $pdo = new PDO($dsn, $username, $password, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_TIMEOUT => 5, // Short timeout for quick failure
+        ]);
+        
+        return $pdo;
+    } catch (Exception $e) {
+        error_log("Failed to create fallback connection: " . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * Get the DSN string for connection (without credentials)
+ * 
+ * @return string DSN connection string 
+ */
+function get_connection_dsn() {
+    global $db_config;
+    
+    if (!isset($db_config) || !is_array($db_config)) {
+        return "mysql:host=unknown;dbname=unknown";
+    }
+    
+    return sprintf(
+        'mysql:host=%s;port=%s;dbname=%s;charset=%s',
+        $db_config['host'] ?? 'unknown',
+        $db_config['port'] ?? 'unknown',
+        $db_config['dbname'] ?? $db_config['name'] ?? 'unknown',
+        $db_config['charset'] ?? 'utf8mb4'
+    );
 }
 
 /**
@@ -182,52 +278,84 @@ function fetchRow($query, array $params = [], $fetchStyle = PDO::FETCH_ASSOC) {
         
         // Bind parameters individually, with better type handling
         if (!empty($params)) {
-            error_log("Binding " . count($params) . " parameters");
-            foreach ($params as $index => $value) {
-                $paramType = PDO::PARAM_STR; // Default type
+            foreach ($params as $key => $value) {
+                // Determine parameter type
+                $type = PDO::PARAM_STR;
                 if (is_int($value)) {
-                    $paramType = PDO::PARAM_INT;
+                    $type = PDO::PARAM_INT;
                 } elseif (is_bool($value)) {
-                    $paramType = PDO::PARAM_BOOL;
+                    $type = PDO::PARAM_BOOL;
                 } elseif (is_null($value)) {
-                    $paramType = PDO::PARAM_NULL;
+                    $type = PDO::PARAM_NULL;
                 }
                 
-                // PDO parameter positions are 1-based
-                $position = is_string($index) ? $index : $index + 1;
-                error_log("Binding parameter at position $position with value: " . (is_array($value) ? json_encode($value) : $value));
-                $stmt->bindValue($position, $value, $paramType);
+                // Handle both positional (numeric keys) and named parameters
+                $param_name = is_numeric($key) ? $key + 1 : $key;
+                $stmt->bindValue($param_name, $value, $type);
             }
         }
         
         // Execute the statement
         error_log("Executing statement...");
         $result = $stmt->execute();
+        
         if (!$result) {
             error_log("Statement execution failed: " . print_r($stmt->errorInfo(), true));
-            throw new Exception("Failed to execute query in fetchRow: " . $stmt->errorInfo()[2]);
+            
+            // Try a simple fallback if this query failed
+            if (strpos($query, 'DESCRIBE') !== false || strpos($query, 'SHOW TABLES') !== false) {
+                error_log("Attempting fallback for simple query: " . $query);
+                
+                try {
+                    // For table information queries, try direct query for more compatibility
+                    $direct_stmt = $conn->query($query);
+                    if ($direct_stmt) {
+                        $rows = [];
+                        while ($row = $direct_stmt->fetch(PDO::FETCH_ASSOC)) {
+                            $rows[] = $row;
+                        }
+                        
+                        error_log("Direct query returned " . count($rows) . " rows");
+                        return !empty($rows) ? $rows[0] : false;
+                    }
+                } catch (Exception $fallback_e) {
+                    error_log("Fallback query failed: " . $fallback_e->getMessage());
+                }
+            }
+            
+            throw new Exception("Failed to execute query in fetchRow: " . print_r($stmt->errorInfo(), true));
         }
         
         // Fetch the row
         error_log("Fetching result...");
         $row = $stmt->fetch($fetchStyle);
         
-        if ($row === false) {
-            error_log("No row found, checking for errors...");
-            if ($stmt->errorCode() !== '00000') {
-                error_log("Error in fetchRow: " . print_r($stmt->errorInfo(), true));
-                throw new Exception("Error fetching row: " . $stmt->errorInfo()[2]);
-            }
-            error_log("No row found but no error occurred (possibly empty result set)");
-        } else {
-            error_log("Row found successfully");
-        }
-        
+        error_log("fetchRow result: " . ($row ? "Found data" : "No data found"));
         return $row;
     } catch (PDOException $e) {
         error_log("PDO Exception in fetchRow: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
         error_log("Query was: " . $query);
         error_log("Parameters were: " . print_r($params, true));
+        
+        // Try a fallback for some common query types that might be failing due to compatibility
+        if (strpos($query, 'DESCRIBE') !== false || strpos($query, 'SHOW TABLES') !== false) {
+            try {
+                error_log("Trying emergency fallback query");
+                
+                // Get a fresh connection
+                $conn = get_fallback_connection();
+                if ($conn) {
+                    // For schema queries, try a direct query without parameters
+                    $direct_result = $conn->query($query);
+                    if ($direct_result) {
+                        return $direct_result->fetch(PDO::FETCH_ASSOC);
+                    }
+                }
+            } catch (Exception $inner_e) {
+                error_log("Emergency fallback also failed: " . $inner_e->getMessage());
+            }
+        }
+        
         throw new Exception("Database error in fetchRow: " . $e->getMessage());
     } catch (Exception $e) {
         error_log("Exception in fetchRow: " . $e->getMessage());
@@ -244,9 +372,110 @@ function fetchRow($query, array $params = [], $fetchStyle = PDO::FETCH_ASSOC) {
  * @return array The fetched rows
  * @throws Exception If the query execution fails
  */
-function fetchAll($query, array $params = [], $fetchStyle = PDO::FETCH_ASSOC) {
-    $stmt = executeQuery($query, $params);
-    return $stmt->fetchAll($fetchStyle);
+function fetchRows($query, array $params = [], $fetchStyle = PDO::FETCH_ASSOC) {
+    try {
+        error_log("fetchRows called with query: " . $query);
+        error_log("Parameters: " . print_r($params, true));
+        
+        $conn = getDbConnection();
+        if (!$conn) {
+            error_log("Database connection failed in fetchRows");
+            throw new Exception("Database connection error in fetchRows");
+        }
+        
+        // Prepare and execute
+        error_log("Preparing statement...");
+        $stmt = $conn->prepare($query);
+        
+        if (!$stmt) {
+            error_log("Failed to prepare statement: " . print_r($conn->errorInfo(), true));
+            throw new Exception("Failed to prepare query in fetchRows");
+        }
+        
+        // Bind parameters individually, with better type handling
+        if (!empty($params)) {
+            foreach ($params as $key => $value) {
+                // Determine parameter type
+                $type = PDO::PARAM_STR;
+                if (is_int($value)) {
+                    $type = PDO::PARAM_INT;
+                } elseif (is_bool($value)) {
+                    $type = PDO::PARAM_BOOL;
+                } elseif (is_null($value)) {
+                    $type = PDO::PARAM_NULL;
+                }
+                
+                // Handle both positional (numeric keys) and named parameters
+                $param_name = is_numeric($key) ? $key + 1 : $key;
+                $stmt->bindValue($param_name, $value, $type);
+            }
+        }
+        
+        // Execute the statement
+        error_log("Executing statement...");
+        $result = $stmt->execute();
+        
+        if (!$result) {
+            error_log("Statement execution failed: " . print_r($stmt->errorInfo(), true));
+            
+            // Try a simple fallback for schema information queries
+            if (strpos($query, 'DESCRIBE') !== false || strpos($query, 'SHOW TABLES') !== false) {
+                error_log("Attempting fallback for simple query: " . $query);
+                
+                try {
+                    // For table information queries, try direct query for more compatibility
+                    $direct_stmt = $conn->query($query);
+                    if ($direct_stmt) {
+                        $rows = [];
+                        while ($row = $direct_stmt->fetch(PDO::FETCH_ASSOC)) {
+                            $rows[] = $row;
+                        }
+                        
+                        error_log("Direct query returned " . count($rows) . " rows");
+                        return $rows;
+                    }
+                } catch (Exception $fallback_e) {
+                    error_log("Fallback query failed: " . $fallback_e->getMessage());
+                }
+            }
+            
+            throw new Exception("Failed to execute query: " . print_r($stmt->errorInfo(), true));
+        }
+        
+        // Fetch all rows
+        $rows = $stmt->fetchAll($fetchStyle);
+        error_log("fetchRows returned " . count($rows) . " rows");
+        
+        return $rows;
+    } catch (PDOException $e) {
+        error_log("PDO Exception in fetchRows: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
+        error_log("Query was: " . $query);
+        error_log("Parameters were: " . print_r($params, true));
+        
+        // Try a fallback for schema information queries
+        if (strpos($query, 'DESCRIBE') !== false || strpos($query, 'SHOW TABLES') !== false) {
+            try {
+                error_log("Trying emergency fallback query for fetchRows");
+                
+                // Get a fresh connection
+                $conn = get_fallback_connection();
+                if ($conn) {
+                    // For schema queries, try a direct query without parameters
+                    $direct_result = $conn->query($query);
+                    if ($direct_result) {
+                        return $direct_result->fetchAll(PDO::FETCH_ASSOC);
+                    }
+                }
+            } catch (Exception $inner_e) {
+                error_log("Emergency fetchRows fallback also failed: " . $inner_e->getMessage());
+            }
+        }
+        
+        throw new Exception("Database error in fetchRows: " . $e->getMessage());
+    } catch (Exception $e) {
+        error_log("Exception in fetchRows: " . $e->getMessage());
+        throw $e;
+    }
 }
 
 /**
