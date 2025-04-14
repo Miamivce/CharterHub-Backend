@@ -212,6 +212,96 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
     }
 }
 
+// Process special debug requests before CORS handling
+if (isset($_GET['debug']) && $_GET['debug'] === 'full_debug') {
+    // This bypasses CORS for direct debugging in browser
+    header('Content-Type: application/json');
+    
+    try {
+        $conn = getDbConnection();
+        
+        // Show basic connection information
+        $debug_info = [
+            'success' => true,
+            'php_version' => PHP_VERSION,
+            'database_connected' => ($conn !== null),
+            'server_time' => date('Y-m-d H:i:s'),
+        ];
+        
+        // Get list of tables
+        $tables = [];
+        $tables_result = $conn->query("SHOW TABLES");
+        while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
+            $tables[] = $row[0];
+        }
+        
+        // Check for specific tables
+        $debug_info['tables'] = $tables;
+        $debug_info['has_bookings_table'] = in_array('wp_charterhub_bookings', $tables) || in_array('charterhub_bookings', $tables);
+        
+        // Try test query on the bookings table
+        $bookings_table = in_array('wp_charterhub_bookings', $tables) ? 'wp_charterhub_bookings' : 'charterhub_bookings';
+        
+        // Get table structure
+        $columns = [];
+        $describe_stmt = $conn->prepare("DESCRIBE $bookings_table");
+        $describe_stmt->execute();
+        while ($row = $describe_stmt->fetch(PDO::FETCH_ASSOC)) {
+            $columns[] = $row;
+        }
+        $debug_info['table_structure'] = $columns;
+        
+        // Try to see if there are any bookings
+        $count_stmt = $conn->prepare("SELECT COUNT(*) as count FROM $bookings_table");
+        $count_stmt->execute();
+        $count = $count_stmt->fetch(PDO::FETCH_ASSOC);
+        $debug_info['total_bookings'] = $count['count'];
+        
+        // Output debug info
+        echo json_encode($debug_info, JSON_PRETTY_PRINT);
+        exit;
+    } catch (Exception $e) {
+        echo json_encode([
+            'success' => false,
+            'error' => 'Debug query error',
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], JSON_PRETTY_PRINT);
+        exit;
+    }
+}
+
+// Detect if this is a debug request with a specific parameter
+if (isset($_GET['debug']) && $_GET['debug'] === 'true') {
+    // Activate detailed error reporting for debugging only
+    set_exception_handler(function($exception) {
+        ob_clean();
+        
+        // Get detailed exception information
+        $trace = $exception->getTraceAsString();
+        $file = $exception->getFile();
+        $line = $exception->getLine();
+        $message = $exception->getMessage();
+        
+        // Log detailed information
+        error_log("BOOKINGS.PHP - Detailed exception: $message in $file:$line");
+        error_log("BOOKINGS.PHP - Stack trace: $trace");
+        
+        echo json_encode([
+            'success' => false,
+            'message' => 'Server exception (debug mode)',
+            'error' => 'exception',
+            'details' => $message,
+            'file' => $file,
+            'line' => $line,
+            'trace' => explode("\n", $trace)
+        ]);
+        exit;
+    });
+    
+    error_log("BOOKINGS.PHP - Debug mode activated");
+}
+
 // Include CORS dependencies for normal API usage
 require_once __DIR__ . '/../../auth/global-cors.php';
 
@@ -493,270 +583,221 @@ function handle_get_request($user) {
                 $users_table = 'wp_charterhub_users';
                 error_log("BOOKINGS.PHP - Using prefixed users table: {$users_table}");
             } else {
-                error_log("BOOKINGS.PHP - No users table found in database");
-                throw new Exception("Users table not found in database");
+                error_log("BOOKINGS.PHP - No users table found");
+                // Non-fatal, continue without users table
             }
             
-            if (in_array('charterhub_booking_guests', $tables)) {
-                $guests_table = 'charterhub_booking_guests';
-                error_log("BOOKINGS.PHP - Using non-prefixed guests table: {$guests_table}");
-            } else if (in_array('wp_charterhub_booking_guests', $tables)) {
-                $guests_table = 'wp_charterhub_booking_guests';
-                error_log("BOOKINGS.PHP - Using prefixed guests table: {$guests_table}");
-            } else {
-                error_log("BOOKINGS.PHP - No booking guests table found");
-                $guests_table = null; // We'll handle this case
-            }
-            
-            // Find yachts table
+            // For yacht details if available
             if (in_array('charterhub_yachts', $tables)) {
                 $yachts_table = 'charterhub_yachts';
-                error_log("BOOKINGS.PHP - Using non-prefixed yachts table: {$yachts_table}");
             } else if (in_array('wp_charterhub_yachts', $tables)) {
                 $yachts_table = 'wp_charterhub_yachts';
-                error_log("BOOKINGS.PHP - Using prefixed yachts table: {$yachts_table}");
-            } else {
-                // We'll handle this case by using a simple subquery
-                error_log("BOOKINGS.PHP - No yachts table found");
-                $yachts_table = null;
             }
             
-            // Check the column names in the bookings table to ensure we use the correct one
-            $columns = [];
-            $describe_query = "DESCRIBE `{$bookings_table}`";
-            $describe_result = $conn->query($describe_query);
-            
-            if (!$describe_result) {
-                error_log("BOOKINGS.PHP - Error describing table: " . implode(", ", $conn->errorInfo()));
-            } else {
-                while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
-                    $columns[] = $row['Field'];
-                }
-                
-                error_log("BOOKINGS.PHP - Bookings table columns: " . implode(", ", $columns));
-                
-                // Determine the correct column name for the customer/charterer ID
-                if (in_array('customer_id', $columns)) {
-                    $charterer_column = 'customer_id';
-                    error_log("BOOKINGS.PHP - Using column: customer_id");
-                } else if (in_array('main_charterer_id', $columns)) {
-                    $charterer_column = 'main_charterer_id';
-                    error_log("BOOKINGS.PHP - Using column: main_charterer_id");
-                } else {
-                    error_log("BOOKINGS.PHP - Neither customer_id nor main_charterer_id found");
-                    throw new Exception("Required charterer column not found in bookings table");
-                }
+            // For guest information if available
+            if (in_array('charterhub_booking_guests', $tables)) {
+                $guests_table = 'charterhub_booking_guests';
+            } else if (in_array('wp_charterhub_booking_guests', $tables)) {
+                $guests_table = 'wp_charterhub_booking_guests';
             }
             
-        } catch (Exception $e) {
-            error_log("BOOKINGS.PHP - Error in table detection: " . $e->getMessage());
-            // Use our defaults from debug information
-            $bookings_table = 'charterhub_bookings';
-            $users_table = 'charterhub_users';
-            $guests_table = 'charterhub_booking_guests';
-            $yachts_table = 'charterhub_yachts';
-            $charterer_column = 'customer_id';  // From debug
-            
-            error_log("BOOKINGS.PHP - Using default table names after error");
-        }
-        
-        error_log("BOOKINGS.PHP - Final table selections:");
-        error_log("BOOKINGS.PHP - Bookings table: {$bookings_table}");
-        error_log("BOOKINGS.PHP - Users table: {$users_table}");
-        error_log("BOOKINGS.PHP - Guests table: {$guests_table}");
-        error_log("BOOKINGS.PHP - Yachts table: {$yachts_table}");
-        error_log("BOOKINGS.PHP - Using charterer column: {$charterer_column}");
-        
-        // Build the query based on available tables and columns
-        // Start with base query that doesn't depend on yacht name
-        $query = "SELECT 
-                    b.id,
-                    b.yacht_id,
-                    b.start_date,
-                    b.end_date,
-                    b.status,
-                    b.total_price,
-                    b.{$charterer_column},
-                    u_main.first_name as main_charterer_first_name,
-                    u_main.last_name as main_charterer_last_name,
-                    u_main.email as main_charterer_email,
-                    b.created_at";
-                    
-        // If yacht table is available, get the yacht name
-        if ($yachts_table) {
-            $query .= ", y.name as yacht_name";
-        } else {
-            $query .= ", 'Unknown Yacht' as yacht_name";
-        }
-        
-        $query .= " FROM `{$bookings_table}` b
-                   LEFT JOIN `{$users_table}` u_main ON b.{$charterer_column} = u_main.id";
-        
-        // Add yacht join only if table exists
-        if ($yachts_table) {
-            $query .= " LEFT JOIN `{$yachts_table}` y ON b.yacht_id = y.id";
-        }
-        
-        // Base WHERE clause
-        $query .= " WHERE b.{$charterer_column} = ?";
-        $params = [$user_id];
-        
-        // Only add guest condition if the guests table exists
-        if ($guests_table) {
-            $query .= " OR b.id IN (SELECT booking_id FROM `{$guests_table}` WHERE user_id = ?)";
-            $params[] = $user_id;
-        }
-        
-        // If specific booking ID requested, add that condition
-        if ($booking_id) {
-            $query .= " AND b.id = ?";
-            $params[] = $booking_id;
-        }
-        
-        $query .= " ORDER BY b.created_at DESC";
-        
-        error_log("BOOKINGS.PHP - Prepared query: " . $query);
-        error_log("BOOKINGS.PHP - Query params: " . implode(", ", $params));
-        
-        // Prepare and execute query using PDO
-        $stmt = $conn->prepare($query);
-        if (!$stmt) {
-            error_log("BOOKINGS.PHP - Failed to prepare query: " . implode(", ", $conn->errorInfo()));
-            throw new Exception("Failed to prepare booking query: " . $conn->errorInfo()[2]);
-        }
-        
-        // Execute with parameters
-        $execute_result = $stmt->execute($params);
-        
-        if (!$execute_result) {
-            error_log("BOOKINGS.PHP - Failed to execute query: " . implode(", ", $stmt->errorInfo()));
-            throw new Exception("Failed to execute booking query: " . $stmt->errorInfo()[2]);
-        }
-        
-        // Fetch all results at once
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        error_log("BOOKINGS.PHP - Query executed successfully, found " . count($rows) . " bookings");
-        
-        // Fetch all bookings
-        $bookings = [];
-        foreach ($rows as $row) {
-            // Get booking guests (separate query for each booking) - only if guests table exists
-            $booking_id = $row['id'];
-            $guests = [];
-            
-            if ($guests_table) {
-                try {
-                    $guests_query = "SELECT 
-                                        bg.id as booking_guest_id,
-                                        bg.user_id,
-                                        u.first_name,
-                                        u.last_name,
-                                        u.email
-                                    FROM `{$guests_table}` bg
-                                    LEFT JOIN `{$users_table}` u ON bg.user_id = u.id
-                                    WHERE bg.booking_id = ?";
-                    
-                    $guests_stmt = $conn->prepare($guests_query);
-                    if (!$guests_stmt) {
-                        error_log("BOOKINGS.PHP - Failed to prepare guests query: " . implode(", ", $conn->errorInfo()));
-                    } else {
-                        $guests_stmt->execute([$booking_id]);
-                        $guest_rows = $guests_stmt->fetchAll(PDO::FETCH_ASSOC);
-                        
-                        foreach ($guest_rows as $guest_row) {
-                            $guests[] = [
-                                'id' => (int)$guest_row['user_id'],
-                                'firstName' => $guest_row['first_name'] ?? '',
-                                'lastName' => $guest_row['last_name'] ?? '',
-                                'email' => $guest_row['email'] ?? ''
-                            ];
-                        }
-                    }
-                } catch (Exception $e) {
-                    error_log("BOOKINGS.PHP - Error fetching guests for booking ID {$booking_id}: " . $e->getMessage());
-                    // Continue with empty guests array
-                }
-            }
-            
-            // Format the booking with all related data
-            // Make sure the charterer column exists in the result set, fall back to safer values if missing
-            $charterer_id = 0;
+            // Determine the correct column name for the main charterer
             try {
-                // Check if the column exists in result set
-                if (isset($row[$charterer_column])) {
-                    $charterer_id = (int)$row[$charterer_column];
-                    error_log("BOOKINGS.PHP - Found charterer ID in column {$charterer_column}: {$charterer_id}");
+                $describe_query = "DESCRIBE " . $bookings_table;
+                $describe_stmt = $conn->prepare($describe_query);
+                $describe_stmt->execute();
+                $columns = $describe_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+                
+                error_log("BOOKINGS.PHP - Found columns in bookings table: " . implode(", ", $columns));
+                
+                // Check if main_charterer_id or customer_id is used
+                if (in_array('main_charterer_id', $columns)) {
+                    $charterer_column = 'main_charterer_id';
+                    error_log("BOOKINGS.PHP - Using main_charterer_id column");
+                } else if (in_array('customer_id', $columns)) {
+                    $charterer_column = 'customer_id';
+                    error_log("BOOKINGS.PHP - Using customer_id column");
                 } else {
-                    error_log("BOOKINGS.PHP - Charterer column '{$charterer_column}' not found in result. Available columns: " . implode(", ", array_keys($row)));
-                    // Try alternate column names
-                    if (isset($row['main_charterer_id'])) {
-                        $charterer_id = (int)$row['main_charterer_id'];
-                        error_log("BOOKINGS.PHP - Using main_charterer_id as fallback: {$charterer_id}");
-                    } elseif (isset($row['customer_id'])) {
-                        $charterer_id = (int)$row['customer_id'];
-                        error_log("BOOKINGS.PHP - Using customer_id as fallback: {$charterer_id}");
-                    } else {
-                        // Last resort, try user_id from GET parameter
-                        $charterer_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
-                        error_log("BOOKINGS.PHP - Using user_id from GET as last resort: {$charterer_id}");
-                    }
+                    error_log("BOOKINGS.PHP - No charterer column found, using default: {$charterer_column}");
                 }
-            } catch (Exception $ce) {
-                error_log("BOOKINGS.PHP - Error accessing charterer ID: " . $ce->getMessage());
-                $charterer_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
+            } catch (Exception $column_e) {
+                error_log("BOOKINGS.PHP - Error checking columns: " . $column_e->getMessage());
+                // Non-fatal, continue with default column name
             }
             
-            $bookings[] = [
-                'id' => (int)$row['id'],
-                'startDate' => $row['start_date'] ?? '',
-                'endDate' => $row['end_date'] ?? '',
-                'status' => $row['status'] ?? 'pending',
-                'totalPrice' => isset($row['total_price']) ? (float)$row['total_price'] : 0.00,
-                'createdAt' => $row['created_at'] ?? date('Y-m-d H:i:s'),
-                'yacht' => [
-                    'id' => isset($row['yacht_id']) ? (int)$row['yacht_id'] : 0,
-                    'name' => $row['yacht_name'] ?? 'Unknown Yacht'
-                ],
-                'mainCharterer' => [
-                    'id' => $charterer_id,
-                    'firstName' => $row['main_charterer_first_name'] ?? '',
-                    'lastName' => $row['main_charterer_last_name'] ?? '',
-                    'email' => $row['main_charterer_email'] ?? ''
-                ],
-                'guestList' => $guests
-            ];
-        }
-        
-        error_log("BOOKINGS.PHP - Successfully processed GET request, returning " . count($bookings) . " bookings");
-        
-        // Return single booking or list based on request
-        if (isset($_GET['id'])) {
-            bookings_json_response([
-                'success' => true,
-                'message' => 'Booking retrieved successfully',
-                'data' => !empty($bookings) ? $bookings[0] : null,
-                'debug_info' => [
-                    'query_time' => microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'],
-                    'booking_count' => count($bookings),
-                    'user_id' => $user_id,
-                    'found_data' => !empty($bookings)
-                ]
-            ]);
-        } else {
-            // Even if no bookings found, return success with empty array
-            bookings_json_response([
-                'success' => true,
-                'message' => count($bookings) > 0 ? 'Bookings retrieved successfully' : 'No bookings found for this user',
-                'data' => $bookings,
-                'debug_info' => [
-                    'query_time' => microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'],
-                    'booking_count' => count($bookings),
-                    'user_id' => $user_id,
-                    'table_name' => $bookings_table,
-                    'charterer_column' => $charterer_column
-                ]
-            ]);
+            // Log the tables and column we're using
+            error_log("BOOKINGS.PHP - Using tables: bookings={$bookings_table}, users={$users_table}, yachts={$yachts_table}, guests={$guests_table}");
+            error_log("BOOKINGS.PHP - Using charterer column: {$charterer_column}");
+            
+            // Build a query based on the tables we have
+            if ($booking_id) {
+                // Return a specific booking
+                $query = "SELECT b.*, 
+                         DATE_FORMAT(b.start_date, '%Y-%m-%d') as formatted_start_date,
+                         DATE_FORMAT(b.end_date, '%Y-%m-%d') as formatted_end_date";
+                
+                // Add yacht details if available
+                if ($yachts_table) {
+                    $query .= ", y.name as yacht_name";
+                }
+                
+                $query .= " FROM {$bookings_table} b";
+                
+                // Join yacht table if available
+                if ($yachts_table) {
+                    $query .= " LEFT JOIN {$yachts_table} y ON b.yacht_id = y.id";
+                }
+                
+                $query .= " WHERE b.id = ? AND b.{$charterer_column} = ?";
+                
+                // Prepare and execute query
+                $stmt = $conn->prepare($query);
+                if (!$stmt) {
+                    error_log("BOOKINGS.PHP - Error preparing statement: " . implode(", ", $conn->errorInfo()));
+                    throw new Exception("Database query preparation failed");
+                }
+                
+                $result = $stmt->execute([$booking_id, $user_id]);
+                if (!$result) {
+                    error_log("BOOKINGS.PHP - Error executing statement: " . implode(", ", $stmt->errorInfo()));
+                    throw new Exception("Database query execution failed");
+                }
+                
+                $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                if (!$booking) {
+                    // No booking found or not authorized
+                    bookings_json_response([
+                        'success' => false,
+                        'message' => 'Booking not found or you do not have permission to view it',
+                        'error' => 'not_found'
+                    ], 404);
+                    return;
+                }
+                
+                // Add guest information if available
+                if ($guests_table && $users_table) {
+                    try {
+                        $guests_query = "SELECT g.id as guest_booking_id, u.id as user_id, 
+                                        u.first_name, u.last_name, u.email 
+                                        FROM {$guests_table} g
+                                        JOIN {$users_table} u ON g.user_id = u.id
+                                        WHERE g.booking_id = ?";
+                        
+                        $guests_stmt = $conn->prepare($guests_query);
+                        if ($guests_stmt) {
+                            $guests_stmt->execute([$booking_id]);
+                            $booking['guests'] = $guests_stmt->fetchAll(PDO::FETCH_ASSOC);
+                        }
+                    } catch (Exception $guests_e) {
+                        error_log("BOOKINGS.PHP - Error fetching guests: " . $guests_e->getMessage());
+                        // Non-fatal, continue without guests
+                    }
+                }
+                
+                // Return response
+                bookings_json_response([
+                    'success' => true,
+                    'message' => 'Booking retrieved successfully',
+                    'data' => $booking
+                ]);
+            } else {
+                // Return all bookings for the user
+                $query = "SELECT b.*, 
+                         DATE_FORMAT(b.start_date, '%Y-%m-%d') as formatted_start_date,
+                         DATE_FORMAT(b.end_date, '%Y-%m-%d') as formatted_end_date";
+                
+                // Add yacht details if available
+                if ($yachts_table) {
+                    $query .= ", y.name as yacht_name";
+                }
+                
+                $query .= " FROM {$bookings_table} b";
+                
+                // Join yacht table if available
+                if ($yachts_table) {
+                    $query .= " LEFT JOIN {$yachts_table} y ON b.yacht_id = y.id";
+                }
+                
+                $query .= " WHERE b.{$charterer_column} = ?";
+                
+                // Include any filters
+                $status = isset($_GET['status']) ? $_GET['status'] : null;
+                $params = [$user_id];
+                
+                if ($status) {
+                    $query .= " AND b.status = ?";
+                    $params[] = $status;
+                }
+                
+                // Add ordering
+                $query .= " ORDER BY b.start_date DESC";
+                
+                // Add limit and offset for pagination
+                $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 10;
+                $offset = isset($_GET['offset']) ? intval($_GET['offset']) : 0;
+                
+                // Get total count for pagination
+                $count_query = "SELECT COUNT(*) as total FROM {$bookings_table} WHERE {$charterer_column} = ?";
+                $count_params = [$user_id];
+                
+                if ($status) {
+                    $count_query .= " AND status = ?";
+                    $count_params[] = $status;
+                }
+                
+                $count_stmt = $conn->prepare($count_query);
+                if (!$count_stmt) {
+                    error_log("BOOKINGS.PHP - Error preparing count statement: " . implode(", ", $conn->errorInfo()));
+                    throw new Exception("Database count query preparation failed");
+                }
+                
+                $count_result = $count_stmt->execute($count_params);
+                if (!$count_result) {
+                    error_log("BOOKINGS.PHP - Error executing count statement: " . implode(", ", $count_stmt->errorInfo()));
+                    throw new Exception("Database count query execution failed");
+                }
+                
+                $count_row = $count_stmt->fetch(PDO::FETCH_ASSOC);
+                $total = $count_row ? intval($count_row['total']) : 0;
+                
+                // Now add limit and offset to main query
+                $query .= " LIMIT ? OFFSET ?";
+                $params[] = $limit;
+                $params[] = $offset;
+                
+                // Debug log the query and params
+                error_log("BOOKINGS.PHP - Query: {$query}");
+                error_log("BOOKINGS.PHP - Params: " . json_encode($params));
+                
+                // Prepare and execute query
+                $stmt = $conn->prepare($query);
+                if (!$stmt) {
+                    error_log("BOOKINGS.PHP - Error preparing statement: " . implode(", ", $conn->errorInfo()));
+                    throw new Exception("Database query preparation failed");
+                }
+                
+                $result = $stmt->execute($params);
+                if (!$result) {
+                    error_log("BOOKINGS.PHP - Error executing statement: " . implode(", ", $stmt->errorInfo()));
+                    throw new Exception("Database query execution failed");
+                }
+                
+                $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Return response
+                bookings_json_response([
+                    'success' => true,
+                    'message' => 'Bookings retrieved successfully',
+                    'data' => $bookings,
+                    'total' => $total,
+                    'limit' => $limit,
+                    'offset' => $offset
+                ]);
+            }
+        } catch (Exception $query_e) {
+            error_log("BOOKINGS.PHP - Error in query processing: " . $query_e->getMessage());
+            throw $query_e; // Rethrow to be caught by outer catch block
         }
     } catch (Exception $e) {
         error_log("BOOKINGS.PHP - Error in GET request: " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
