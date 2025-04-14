@@ -134,7 +134,8 @@ function handle_get_request() {
             // Use direct image URL if available
             $destination['featured_image'] = $destination['direct_featured_image'];
         } else {
-            $destination['featured_image'] = '';
+            // If no featured image was found, use our fallback function
+            $destination['featured_image'] = get_default_image_for_destination($destination['name']);
         }
         unset($destination['direct_featured_image']); // Remove this field from the response
         
@@ -315,7 +316,8 @@ function handle_get_request() {
                 // Use direct image URL if available
                 $row['featured_image'] = $row['direct_featured_image'];
             } else {
-                $row['featured_image'] = '';
+                // If no featured image was found, use our fallback function
+                $row['featured_image'] = get_default_image_for_destination($row['name']);
             }
             unset($row['direct_featured_image']); // Remove this field from the response
             
@@ -633,9 +635,43 @@ function json_response($data, $status_code = 200) {
  * @return string The URL to a default image
  */
 function get_default_image_for_destination($destination_name) {
-    // This function is now disabled as we only want to use images from the database
-    // Return empty string to indicate no image is available
-    return '';
+    // Map of destination names to local image paths
+    $destination_images = [
+        'BAHAMAS' => '/images/destinations/bahamas.jpg',
+        'BALEARIC ISLANDS' => '/images/destinations/balearic.jpg',
+        'CARIBBEAN' => '/images/destinations/caribbean.jpg',
+        'CORSICA & SARDINIA' => '/images/destinations/corsica.jpg',
+        'CROATIA & MONTENEGRO' => '/images/destinations/croatia.jpg',
+        'FRENCH POLYNESIA' => '/images/destinations/french-polynesia.jpg',
+        'FRENCH RIVIERA' => '/images/destinations/french-riviera.jpg',
+        'GALAPAGOS' => '/images/destinations/galapagos.jpg',
+        'GREEK ISLANDS' => '/images/destinations/greek-islands.jpg',
+        'INDONESIA' => '/images/destinations/indonesia.jpg',
+        'ITALIAN RIVIERA' => '/images/destinations/italian-riviera.jpg',
+        'MALAYSIA' => '/images/destinations/malaysia.jpg',
+        'MALDIVES' => '/images/destinations/maldives.jpg',
+        'RED SEA' => '/images/destinations/red-sea.jpg',
+        'SEYCHELLES' => '/images/destinations/seychelles.jpg',
+        'SICILY & AEOLIAN ISLANDS' => '/images/destinations/sicily.jpg',
+        'SOUTH PACIFIC' => '/images/destinations/south-pacific.jpg',
+        'THAILAND' => '/images/destinations/thailand.jpg',
+        'TURKISH RIVIERA' => '/images/destinations/turkish-riviera.jpg',
+        'UK' => '/images/destinations/uk.jpg',
+    ];
+    
+    // Clean the destination name for comparison
+    $cleaned_name = strtoupper(trim($destination_name));
+    
+    // Return the mapped image or a default one
+    if (isset($destination_images[$cleaned_name])) {
+        // Get site URL to make absolute path
+        $site_url = get_site_url();
+        return rtrim($site_url, '/') . $destination_images[$cleaned_name];
+    }
+    
+    // Default generic destination image
+    $site_url = get_site_url();
+    return rtrim($site_url, '/') . '/images/destinations/default.jpg';
 }
 
 // Get the site URL
