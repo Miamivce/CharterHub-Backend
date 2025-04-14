@@ -472,60 +472,72 @@ function handle_get_request($user) {
             }
             
             // Set the default tables based on debug information
-            if (in_array('charterhub_bookings', $tables)) {
-                $bookings_table = 'charterhub_bookings';
-                error_log("BOOKINGS.PHP - Using non-prefixed bookings table: {$bookings_table}");
-            } else if (in_array('wp_charterhub_bookings', $tables)) {
+            if (in_array('wp_charterhub_bookings', $tables)) {
                 $bookings_table = 'wp_charterhub_bookings';
                 error_log("BOOKINGS.PHP - Using prefixed bookings table: {$bookings_table}");
+            } else if (in_array('charterhub_bookings', $tables)) {
+                $bookings_table = 'charterhub_bookings';
+                error_log("BOOKINGS.PHP - Using non-prefixed bookings table: {$bookings_table}");
             } else {
                 error_log("BOOKINGS.PHP - No bookings table found in: " . implode(", ", $tables));
                 throw new Exception("Bookings table not found in database");
             }
             
-            if (in_array('charterhub_users', $tables)) {
-                $users_table = 'charterhub_users';
-                error_log("BOOKINGS.PHP - Using non-prefixed users table: {$users_table}");
-            } else if (in_array('wp_charterhub_users', $tables)) {
+            if (in_array('wp_charterhub_users', $tables)) {
                 $users_table = 'wp_charterhub_users';
                 error_log("BOOKINGS.PHP - Using prefixed users table: {$users_table}");
+            } else if (in_array('charterhub_users', $tables)) {
+                $users_table = 'charterhub_users';
+                error_log("BOOKINGS.PHP - Using non-prefixed users table: {$users_table}");
             } else {
                 error_log("BOOKINGS.PHP - No users table found");
                 // Non-fatal, continue without users table
             }
             
             // For yacht details if available
-            if (in_array('charterhub_yachts', $tables)) {
-                $yachts_table = 'charterhub_yachts';
-            } else if (in_array('wp_charterhub_yachts', $tables)) {
+            if (in_array('wp_charterhub_yachts', $tables)) {
                 $yachts_table = 'wp_charterhub_yachts';
+            } else if (in_array('charterhub_yachts', $tables)) {
+                $yachts_table = 'charterhub_yachts';
             }
             
             // For guest information if available
-            if (in_array('charterhub_booking_guests', $tables)) {
-                $guests_table = 'charterhub_booking_guests';
-            } else if (in_array('wp_charterhub_booking_guests', $tables)) {
+            if (in_array('wp_charterhub_booking_guests', $tables)) {
                 $guests_table = 'wp_charterhub_booking_guests';
+            } else if (in_array('charterhub_booking_guests', $tables)) {
+                $guests_table = 'charterhub_booking_guests';
             }
             
             // Determine the correct column name for the main charterer
             try {
                 $describe_query = "DESCRIBE " . $bookings_table;
                 $describe_stmt = $conn->prepare($describe_query);
-                $describe_stmt->execute();
-                $columns = $describe_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
                 
-                error_log("BOOKINGS.PHP - Found columns in bookings table: " . implode(", ", $columns));
-            
-            // Check if main_charterer_id or customer_id is used
-            if (in_array('main_charterer_id', $columns)) {
-                $charterer_column = 'main_charterer_id';
-                    error_log("BOOKINGS.PHP - Using main_charterer_id column");
-                } else if (in_array('customer_id', $columns)) {
-                $charterer_column = 'customer_id';
-                    error_log("BOOKINGS.PHP - Using customer_id column");
-            } else {
-                    error_log("BOOKINGS.PHP - No charterer column found, using default: {$charterer_column}");
+                if (!$describe_stmt) {
+                    error_log("BOOKINGS.PHP - Error preparing DESCRIBE statement: " . implode(", ", $conn->errorInfo()));
+                    // Use default column name
+                } else {
+                    $describe_result = $describe_stmt->execute();
+                    
+                    if (!$describe_result) {
+                        error_log("BOOKINGS.PHP - Error executing DESCRIBE statement: " . implode(", ", $describe_stmt->errorInfo()));
+                        // Use default column name
+                    } else {
+                        $columns = $describe_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+                        
+                        error_log("BOOKINGS.PHP - Found columns in bookings table: " . implode(", ", $columns));
+                    
+                        // Check if main_charterer_id or customer_id is used
+                        if (in_array('main_charterer_id', $columns)) {
+                            $charterer_column = 'main_charterer_id';
+                            error_log("BOOKINGS.PHP - Using main_charterer_id column");
+                        } else if (in_array('customer_id', $columns)) {
+                            $charterer_column = 'customer_id';
+                            error_log("BOOKINGS.PHP - Using customer_id column");
+                        } else {
+                            error_log("BOOKINGS.PHP - No charterer column found, using default: {$charterer_column}");
+                        }
+                    }
                 }
             } catch (Exception $column_e) {
                 error_log("BOOKINGS.PHP - Error checking columns: " . $column_e->getMessage());
@@ -539,9 +551,19 @@ function handle_get_request($user) {
             // Build a query based on the tables we have
             if ($booking_id) {
                 // Return a specific booking
-                $query = "SELECT b.*, 
-                         DATE_FORMAT(b.start_date, '%Y-%m-%d') as formatted_start_date,
-                         DATE_FORMAT(b.end_date, '%Y-%m-%d') as formatted_end_date";
+                $query = "SELECT b.* ";
+                
+                // Add formatted dates fields using MySQL DATE_FORMAT function if available
+                try {
+                    $date_format_test = $conn->query("SELECT DATE_FORMAT(NOW(), '%Y-%m-%d') as test");
+                    if ($date_format_test && $date_format_test->fetch()) {
+                        $query .= ", DATE_FORMAT(b.start_date, '%Y-%m-%d') as formatted_start_date, 
+                                  DATE_FORMAT(b.end_date, '%Y-%m-%d') as formatted_end_date";
+                    }
+                } catch (Exception $date_e) {
+                    // Skip date formatting if it's not supported
+                    error_log("BOOKINGS.PHP - Date formatting not supported: " . $date_e->getMessage());
+                }
                 
                 // Add yacht details if available
                 if ($yachts_table) {
@@ -556,6 +578,9 @@ function handle_get_request($user) {
                 }
                 
                 $query .= " WHERE b.id = ? AND b.{$charterer_column} = ?";
+                
+                error_log("BOOKINGS.PHP - Specific booking query: " . $query);
+                error_log("BOOKINGS.PHP - Params: booking_id=" . $booking_id . ", user_id=" . $user_id);
                 
                 // Prepare and execute query
                 $stmt = $conn->prepare($query);
@@ -610,9 +635,19 @@ function handle_get_request($user) {
                 ]);
             } else {
                 // Return all bookings for the user
-                $query = "SELECT b.*, 
-                         DATE_FORMAT(b.start_date, '%Y-%m-%d') as formatted_start_date,
-                         DATE_FORMAT(b.end_date, '%Y-%m-%d') as formatted_end_date";
+                $query = "SELECT b.* ";
+                
+                // Add formatted dates if supported
+                try {
+                    $date_format_test = $conn->query("SELECT DATE_FORMAT(NOW(), '%Y-%m-%d') as test");
+                    if ($date_format_test && $date_format_test->fetch()) {
+                        $query .= ", DATE_FORMAT(b.start_date, '%Y-%m-%d') as formatted_start_date, 
+                                  DATE_FORMAT(b.end_date, '%Y-%m-%d') as formatted_end_date";
+                    }
+                } catch (Exception $date_e) {
+                    // Skip date formatting if it's not supported
+                    error_log("BOOKINGS.PHP - Date formatting not supported: " . $date_e->getMessage());
+                }
                 
                 // Add yacht details if available
                 if ($yachts_table) {
@@ -653,6 +688,9 @@ function handle_get_request($user) {
                     $count_params[] = $status;
                 }
                 
+                error_log("BOOKINGS.PHP - Count query: " . $count_query);
+                error_log("BOOKINGS.PHP - Count params: " . json_encode($count_params));
+                
                 $count_stmt = $conn->prepare($count_query);
                 if (!$count_stmt) {
                     error_log("BOOKINGS.PHP - Error preparing count statement: " . implode(", ", $conn->errorInfo()));
@@ -691,16 +729,17 @@ function handle_get_request($user) {
                 }
                 
                 $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                error_log("BOOKINGS.PHP - Retrieved " . count($bookings) . " bookings");
                 
                 // Return response
                 bookings_json_response([
-                'success' => true,
-                'message' => 'Bookings retrieved successfully',
+                    'success' => true,
+                    'message' => 'Bookings retrieved successfully',
                     'data' => $bookings,
                     'total' => $total,
                     'limit' => $limit,
                     'offset' => $offset
-            ]);
+                ]);
             }
         } catch (Exception $query_e) {
             error_log("BOOKINGS.PHP - Error in query processing: " . $query_e->getMessage());
@@ -713,7 +752,7 @@ function handle_get_request($user) {
         // Return a more detailed error response for troubleshooting
         bookings_json_response([
             'success' => false,
-            'message' => 'Error retrieving booking data',
+            'message' => 'Error retrieving booking data: ' . $e->getMessage(),
             'error' => 'database_error',
             'details' => $e->getMessage(),
             'diagnostics' => [
