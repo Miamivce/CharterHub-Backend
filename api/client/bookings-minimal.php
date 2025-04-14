@@ -7,14 +7,25 @@
 // Buffer output
 ob_start();
 
-// Set headers immediately
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+// Define constant for includes
+if (!defined('CHARTERHUB_LOADED')) {
+    define('CHARTERHUB_LOADED', true);
+}
+
+// Include essential dependencies for authentication and database
+require_once __DIR__ . '/../../utils/database.php';
+require_once __DIR__ . '/../../auth/jwt-core.php';
+
+// Log memory usage
+$memory_start = memory_get_usage();
+error_log("MINIMAL-BOOKINGS: Starting with memory usage: " . $memory_start . " bytes");
 
 // Basic error handling
 set_error_handler(function($severity, $message, $file, $line) {
+    // Clean output buffer
+    if (ob_get_level()) ob_clean();
+    
+    header('Content-Type: application/json');
     echo json_encode([
         'success' => false,
         'error' => 'php_error',
@@ -26,6 +37,10 @@ set_error_handler(function($severity, $message, $file, $line) {
 }, E_ALL);
 
 set_exception_handler(function($e) {
+    // Clean output buffer
+    if (ob_get_level()) ob_clean();
+    
+    header('Content-Type: application/json');
     echo json_encode([
         'success' => false,
         'error' => 'exception',
@@ -36,34 +51,93 @@ set_exception_handler(function($e) {
     exit;
 });
 
-// Define constant for includes
-if (!defined('CHARTERHUB_LOADED')) {
-    define('CHARTERHUB_LOADED', true);
+// Handle CORS properly for security
+$incoming_origin = $_SERVER['HTTP_ORIGIN'] ?? '*';
+header('Content-Type: application/json');
+
+// Set specific origin if provided (for credentials support)
+if ($incoming_origin !== '*') {
+    header("Access-Control-Allow-Origin: $incoming_origin");
+    header("Access-Control-Allow-Credentials: true");
+} else {
+    header('Access-Control-Allow-Origin: *');
 }
 
-// Include only essential dependencies
-require_once __DIR__ . '/../../utils/database.php';
+header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-// Log memory usage
-$memory_start = memory_get_usage();
-error_log("MINIMAL-BOOKINGS: Starting with memory usage: " . $memory_start . " bytes");
+// Handle preflight requests
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
+}
 
 try {
-    // Extract auth header (simplified)
+    // Extract auth header (more robust version)
     $auth_header = null;
-    $headers = getallheaders();
+    $token = null;
     
-    if (isset($headers['Authorization'])) {
-        $auth_header = $headers['Authorization'];
-    } else if (isset($headers['authorization'])) {
-        $auth_header = $headers['authorization'];
-    } else if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        $auth_header = $_SERVER['HTTP_AUTHORIZATION'];
+    // Method 1: Try getallheaders() function
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        
+        foreach (['Authorization', 'authorization'] as $header_name) {
+            if (isset($headers[$header_name])) {
+                $auth_header = $headers[$header_name];
+                break;
+            }
+        }
     }
     
-    // Just log auth header status - don't validate it in this diagnostic version
+    // Method 2: Try $_SERVER variables
+    if (empty($auth_header)) {
+        $server_vars = ['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION'];
+        
+        foreach ($server_vars as $var) {
+            if (isset($_SERVER[$var]) && !empty($_SERVER[$var])) {
+                $auth_header = $_SERVER[$var];
+                break;
+            }
+        }
+    }
+    
+    // Log auth header status
     $auth_status = !empty($auth_header) ? "Found: " . substr($auth_header, 0, 20) . "..." : "Not found";
     error_log("MINIMAL-BOOKINGS: Auth header - " . $auth_status);
+    
+    // Verify token if auth header exists (optional for diagnostic endpoint)
+    $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
+    $token_verified = false;
+    
+    if (!empty($auth_header) && preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
+        $token = $matches[1];
+        
+        try {
+            // Use minimal token verification from jwt-core
+            $payload = verify_token($token);
+            if ($payload && isset($payload->sub)) {
+                // Override user_id with the authenticated one for security
+                $user_id = intval($payload->sub);
+                $token_verified = true;
+                error_log("MINIMAL-BOOKINGS: Token verified for user ID: $user_id");
+            }
+        } catch (Exception $auth_e) {
+            // Just log the error, don't fail the diagnostic endpoint
+            error_log("MINIMAL-BOOKINGS: Token verification error: " . $auth_e->getMessage());
+        }
+    }
+    
+    // Only proceed with verified token or explicit debug mode
+    $debug_mode = isset($_GET['debug']) && $_GET['debug'] === 'true';
+    
+    if (!$token_verified && !$debug_mode) {
+        // Return a generic error without details for security
+        echo json_encode([
+            'success' => false,
+            'message' => 'Authentication required',
+            'error' => 'auth_required'
+        ]);
+        exit;
+    }
     
     // Simplified database connection
     try {
@@ -71,11 +145,9 @@ try {
         $conn = getDbConnection();
         error_log("MINIMAL-BOOKINGS: Database connected successfully");
         
-        // Get user ID from request
-        $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
         error_log("MINIMAL-BOOKINGS: User ID from request: " . $user_id);
         
-        // Find booking table
+        // Find booking table with proper escaping
         $tables_result = $conn->query("SHOW TABLES");
         $tables = [];
         while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
@@ -110,6 +182,7 @@ try {
         
         // Simple count query only - no complex joins or data processing
         if ($booking_table && $user_id > 0) {
+            // Get total count
             $count_query = "SELECT COUNT(*) as count FROM {$booking_table} WHERE {$charterer_column} = ?";
             $count_stmt = $conn->prepare($count_query);
             $count_stmt->execute([$user_id]);
@@ -118,12 +191,24 @@ try {
             
             error_log("MINIMAL-BOOKINGS: Found {$count} bookings for user {$user_id}");
             
+            // Get a few basic bookings for diagnostics (limit to 3)
+            $sample_bookings = [];
+            if ($count > 0) {
+                $sample_query = "SELECT id, {$charterer_column}, start_date, end_date, status FROM {$booking_table} 
+                                WHERE {$charterer_column} = ? ORDER BY start_date DESC LIMIT 3";
+                $sample_stmt = $conn->prepare($sample_query);
+                $sample_stmt->execute([$user_id]);
+                $sample_bookings = $sample_stmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+            
             // Success response with minimal data
             echo json_encode([
                 'success' => true,
                 'message' => 'Minimal bookings API working',
                 'user_id' => $user_id,
+                'token_verified' => $token_verified,
                 'booking_count' => $count,
+                'sample_bookings' => $sample_bookings,
                 'memory_usage' => [
                     'start' => $memory_start,
                     'peak' => memory_get_peak_usage(),
