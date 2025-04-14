@@ -394,22 +394,41 @@ try {
     
     if (!empty($auth_header)) {
         error_log("BOOKINGS.PHP - Authorization header found: " . substr($auth_header, 0, 20) . "...");
+        
+        // Extract the token from the Bearer format
+        $matches = [];
+        if (preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
+            $token = $matches[1];
+            error_log("BOOKINGS.PHP - Token extracted, length: " . strlen($token));
+            
+            // Call verify_jwt_token WITH the token
+            $user = verify_jwt_token($token);
+            
+            if (!$user) {
+                error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
+                bookings_json_response([
+                    'success' => false,
+                    'message' => 'Unauthorized access'
+                ], 401);
+                exit;
+            } else {
+                error_log("BOOKINGS.PHP - JWT verification successful, user ID: " . $user['id']);
+            }
+        } else {
+            error_log("BOOKINGS.PHP - No Bearer token found in Authorization header");
+            bookings_json_response([
+                'success' => false,
+                'message' => 'Invalid authorization format'
+            ], 401);
+            exit;
+        }
     } else {
         error_log("BOOKINGS.PHP - No Authorization header found");
-    }
-    
-    // Call the verify_jwt_token function (without arguments)
-    $user = verify_jwt_token();
-    
-    if (!$user) {
-        error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
         bookings_json_response([
             'success' => false,
-            'message' => 'Unauthorized access'
+            'message' => 'No authorization provided'
         ], 401);
         exit;
-    } else {
-        error_log("BOOKINGS.PHP - JWT verification successful, user ID: " . $user['id']);
     }
 
     // Handle different HTTP methods

@@ -197,21 +197,52 @@ try {
             // Extract the token from the Authorization header
             if (preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
                 $token = $matches[1];
+                $debug_info['auth']['token_found'] = true;
+                $debug_info['auth']['token_length'] = strlen($token);
+            } else {
+                $debug_info['auth']['token_found'] = false;
+                $debug_info['auth']['error'] = 'No Bearer token found in Authorization header';
             }
             
             $debug_info['auth']['token_provided'] = true;
             
             if ($token) {
-                // Call verify_token from jwt-core.php
-                $payload = verify_token($token);
-                if ($payload) {
-                    $debug_info['auth']['token_valid'] = true;
-                    $debug_info['auth']['user_id'] = $payload->sub;
-                    $debug_info['auth']['role'] = $payload->role;
-                    $debug_info['auth']['expiry'] = date('Y-m-d H:i:s', $payload->exp);
-                } else {
+                try {
+                    // Try verify_token first (from jwt-core.php)
+                    $payload = verify_token($token);
+                    if ($payload) {
+                        $debug_info['auth']['token_valid'] = true;
+                        $debug_info['auth']['user_id'] = $payload->sub;
+                        $debug_info['auth']['role'] = $payload->role;
+                        $debug_info['auth']['expiry'] = date('Y-m-d H:i:s', $payload->exp);
+                    } else {
+                        $debug_info['auth']['token_valid'] = false;
+                        $debug_info['auth']['error'] = 'Token verification failed';
+                    }
+                } catch (Exception $verify_e) {
                     $debug_info['auth']['token_valid'] = false;
-                    $debug_info['auth']['error'] = 'Token verification failed';
+                    $debug_info['auth']['verify_error'] = $verify_e->getMessage();
+                    
+                    // Add more detailed diagnostics about the token
+                    try {
+                        $parts = explode('.', $token);
+                        if (count($parts) === 3) {
+                            $debug_info['auth']['token_format'] = 'Valid JWT format (3 parts)';
+                            
+                            // Try to decode the header
+                            $header_json = base64_decode(str_replace(['-', '_'], ['+', '/'], $parts[0]));
+                            if ($header_json) {
+                                $header = json_decode($header_json);
+                                if ($header) {
+                                    $debug_info['auth']['token_header'] = $header;
+                                }
+                            }
+                        } else {
+                            $debug_info['auth']['token_format'] = 'Invalid JWT format (not 3 parts)';
+                        }
+                    } catch (Exception $token_e) {
+                        $debug_info['auth']['token_decode_error'] = $token_e->getMessage();
+                    }
                 }
             } else {
                 $debug_info['auth']['error'] = 'Unable to extract token from authorization header';
