@@ -79,7 +79,7 @@ function handle_get_request() {
         
         $destination = $result->fetch_assoc();
         
-        // Get the featured image URL if available
+        // If a featured image was found, use it
         if (!empty($destination['featured_image_id'])) {
             $image_query = "
                 SELECT guid FROM wp_posts 
@@ -90,7 +90,7 @@ function handle_get_request() {
             $image_stmt->execute();
             $image_result = $image_stmt->get_result();
             
-            if ($image_result->num_rows > 0) {
+            if ($image_result && $image_result->num_rows > 0) {
                 $image = $image_result->fetch_assoc();
                 $destination['featured_image'] = $image['guid'];
             } else {
@@ -107,10 +107,7 @@ function handle_get_request() {
         }
         unset($destination['direct_featured_image']); // Remove this field from the response
         
-        // If featured image is empty, use default image based on destination name
-        if (empty($destination['featured_image'])) {
-            $destination['featured_image'] = get_default_image_for_destination($destination['name']);
-        }
+        // No fallback images - we only use what's in the database
         
         // Convert highlights to array if it's serialized
         if (!empty($destination['highlights'])) {
@@ -179,7 +176,7 @@ function handle_get_request() {
         
         $destinations = [];
         while ($row = $result->fetch_assoc()) {
-            // Get the featured image URL if available
+            // If a featured image was found, use it
             if (!empty($row['featured_image_id'])) {
                 $image_query = "
                     SELECT guid FROM wp_posts 
@@ -203,10 +200,7 @@ function handle_get_request() {
             }
             unset($row['direct_featured_image']); // Remove this field from the response
             
-            // If featured image is empty, use default image based on destination name
-            if (empty($row['featured_image'])) {
-                $row['featured_image'] = get_default_image_for_destination($row['name']);
-            }
+            // No fallback images - we only use what's in the database
             
             // Convert highlights to array if it's serialized
             if (!empty($row['highlights'])) {
@@ -321,37 +315,7 @@ function json_response($data, $status_code = 200) {
  * @return string The URL to a default image
  */
 function get_default_image_for_destination($destination_name) {
-    // Use a static map of destination images from yachtstory.com
-    // These are the actual images used by the live app
-    $destination_map = [
-        'BAHAMAS' => 'https://yachtstory.com/wp-content/uploads/2024/02/bahamas.jpg',
-        'BALEARIC ISLANDS' => 'https://yachtstory.com/wp-content/uploads/2024/02/balearic.jpg',
-        'CARIBBEAN' => 'https://yachtstory.com/wp-content/uploads/2024/02/caribbean.jpg',
-        'CORSICA & SARDINIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/corsica.jpg',
-        'CROATIA & MONTENEGRO' => 'https://yachtstory.com/wp-content/uploads/2024/02/croatia.jpg',
-        'FRENCH POLYNESIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/polynesia.jpg',
-        'FRENCH RIVIERA' => 'https://yachtstory.com/wp-content/uploads/2024/02/french-riviera.jpg',
-        'GALAPAGOS' => 'https://yachtstory.com/wp-content/uploads/2024/02/galapagos.jpg',
-        'GREEK ISLANDS' => 'https://yachtstory.com/wp-content/uploads/2024/02/greek.jpg',
-        'INDONESIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/indonesia.jpg',
-        'ITALIAN RIVIERA' => 'https://yachtstory.com/wp-content/uploads/2024/02/italian-riviera.jpg',
-        'MALAYSIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/malaysia.jpg',
-        'MALDIVES' => 'https://yachtstory.com/wp-content/uploads/2024/02/maldives.jpg',
-        'RED SEA' => 'https://yachtstory.com/wp-content/uploads/2024/02/red-sea.jpg',
-        'SEYCHELLES' => 'https://yachtstory.com/wp-content/uploads/2024/02/seychelles.jpg',
-        'SICILY & AEOLIAN ISLANDS' => 'https://yachtstory.com/wp-content/uploads/2024/02/sicily.jpg',
-        'SOUTH PACIFIC' => 'https://yachtstory.com/wp-content/uploads/2024/02/south-pacific.jpg',
-        'THAILAND' => 'https://yachtstory.com/wp-content/uploads/2024/02/thailand.jpg',
-        'TURKISH RIVIERA' => 'https://yachtstory.com/wp-content/uploads/2024/02/turkish-riviera.jpg',
-        'UK' => 'https://yachtstory.com/wp-content/uploads/2024/02/uk.jpg'
-    ];
-    
-    // Handle HTML entities in destination names (like &amp;)
-    $clean_name = html_entity_decode($destination_name);
-    
-    // Default fallback image for any destination not in the map
-    $default_image = 'https://yachtstory.com/wp-content/uploads/2024/02/yacht-destination.jpg';
-    
-    // Return the mapped image or default
-    return isset($destination_map[$clean_name]) ? $destination_map[$clean_name] : $default_image;
+    // This function is now disabled as we only want to use images from the database
+    // Return empty string to indicate no image is available
+    return '';
 } 
