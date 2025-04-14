@@ -26,7 +26,12 @@ $response = [
 // Handle different HTTP methods
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
-        handle_get_request();
+        // Check for debug mode first
+        if (isset($_GET['debug']) && $_GET['debug'] === 'image_data') {
+            debug_image_data();
+        } else {
+            handle_get_request();
+        }
         break;
     default:
         json_response([
@@ -82,8 +87,9 @@ function handle_get_request() {
         // If a featured image was found, use it
         if (!empty($destination['featured_image_id'])) {
             $image_query = "
-                SELECT guid FROM wp_posts 
-                WHERE ID = ? AND post_type = 'attachment'
+                SELECT p.guid, p.post_title 
+                FROM wp_posts p
+                WHERE p.ID = ? AND p.post_type = 'attachment'
             ";
             $image_stmt = $conn->prepare($image_query);
             $image_stmt->bind_param("i", $destination['featured_image_id']);
@@ -93,8 +99,33 @@ function handle_get_request() {
             if ($image_result && $image_result->num_rows > 0) {
                 $image = $image_result->fetch_assoc();
                 $destination['featured_image'] = $image['guid'];
+                
+                // If the guid doesn't start with http, it might be a relative URL
+                if (!empty($destination['featured_image']) && substr($destination['featured_image'], 0, 4) !== 'http') {
+                    // Try to construct a full URL
+                    $site_url = get_site_url();
+                    $destination['featured_image'] = rtrim($site_url, '/') . '/' . ltrim($destination['featured_image'], '/');
+                }
             } else {
-                $destination['featured_image'] = '';
+                // Try to get image URL from wp_postmeta
+                $meta_query = "
+                    SELECT meta_value 
+                    FROM wp_postmeta 
+                    WHERE post_id = ? AND meta_key = '_wp_attached_file'
+                ";
+                $meta_stmt = $conn->prepare($meta_query);
+                $meta_stmt->bind_param("i", $destination['featured_image_id']);
+                $meta_stmt->execute();
+                $meta_result = $meta_stmt->get_result();
+                
+                if ($meta_result && $meta_result->num_rows > 0) {
+                    $meta = $meta_result->fetch_assoc();
+                    $upload_dir = wp_upload_dir();
+                    $destination['featured_image'] = $upload_dir['baseurl'] . '/' . $meta['meta_value'];
+                } else {
+                    $destination['featured_image'] = '';
+                }
+                $meta_stmt->close();
             }
             
             $image_stmt->close();
@@ -107,7 +138,73 @@ function handle_get_request() {
         }
         unset($destination['direct_featured_image']); // Remove this field from the response
         
-        // No fallback images - we only use what's in the database
+        // If no featured image was found, try to get the banner image from ACF field
+        if (empty($destination['featured_image'])) {
+            $banner_query = "
+                SELECT meta_value 
+                FROM wp_postmeta 
+                WHERE post_id = ? AND meta_key = 'destination_detail__banner_image'
+                LIMIT 1
+            ";
+            $banner_stmt = $conn->prepare($banner_query);
+            $banner_stmt->bind_param("i", $location_id);
+            $banner_stmt->execute();
+            $banner_result = $banner_stmt->get_result();
+            
+            if ($banner_result && $banner_result->num_rows > 0) {
+                $banner = $banner_result->fetch_assoc();
+                $banner_id = $banner['meta_value'];
+                
+                if (!empty($banner_id)) {
+                    // First try to get the image URL from wp_posts
+                    $banner_image_query = "
+                        SELECT guid 
+                        FROM wp_posts 
+                        WHERE ID = ? AND post_type = 'attachment'
+                        LIMIT 1
+                    ";
+                    $banner_image_stmt = $conn->prepare($banner_image_query);
+                    $banner_image_stmt->bind_param("i", $banner_id);
+                    $banner_image_stmt->execute();
+                    $banner_image_result = $banner_image_stmt->get_result();
+                    
+                    if ($banner_image_result && $banner_image_result->num_rows > 0) {
+                        $banner_image = $banner_image_result->fetch_assoc();
+                        $destination['featured_image'] = $banner_image['guid'];
+                        
+                        // If the guid doesn't start with http, it might be a relative URL
+                        if (!empty($destination['featured_image']) && substr($destination['featured_image'], 0, 4) !== 'http') {
+                            $site_url = get_site_url();
+                            $destination['featured_image'] = rtrim($site_url, '/') . '/' . ltrim($destination['featured_image'], '/');
+                        }
+                    } else {
+                        // Try to get image URL from wp_postmeta
+                        $banner_meta_query = "
+                            SELECT meta_value 
+                            FROM wp_postmeta 
+                            WHERE post_id = ? AND meta_key = '_wp_attached_file'
+                            LIMIT 1
+                        ";
+                        $banner_meta_stmt = $conn->prepare($banner_meta_query);
+                        $banner_meta_stmt->bind_param("i", $banner_id);
+                        $banner_meta_stmt->execute();
+                        $banner_meta_result = $banner_meta_stmt->get_result();
+                        
+                        if ($banner_meta_result && $banner_meta_result->num_rows > 0) {
+                            $banner_meta = $banner_meta_result->fetch_assoc();
+                            $upload_dir = wp_upload_dir();
+                            $destination['featured_image'] = $upload_dir['baseurl'] . '/' . $banner_meta['meta_value'];
+                        }
+                        
+                        $banner_meta_stmt->close();
+                    }
+                    
+                    $banner_image_stmt->close();
+                }
+            }
+            
+            $banner_stmt->close();
+        }
         
         // Convert highlights to array if it's serialized
         if (!empty($destination['highlights'])) {
@@ -179,16 +276,38 @@ function handle_get_request() {
             // If a featured image was found, use it
             if (!empty($row['featured_image_id'])) {
                 $image_query = "
-                    SELECT guid FROM wp_posts 
-                    WHERE ID = {$row['featured_image_id']} AND post_type = 'attachment'
+                    SELECT p.guid, p.post_title 
+                    FROM wp_posts p 
+                    WHERE p.ID = {$row['featured_image_id']} AND p.post_type = 'attachment'
                 ";
                 $image_result = $conn->query($image_query);
                 
                 if ($image_result && $image_result->num_rows > 0) {
                     $image = $image_result->fetch_assoc();
                     $row['featured_image'] = $image['guid'];
+                    
+                    // If the guid doesn't start with http, it might be a relative URL
+                    if (!empty($row['featured_image']) && substr($row['featured_image'], 0, 4) !== 'http') {
+                        // Try to construct a full URL
+                        $site_url = get_site_url();
+                        $row['featured_image'] = rtrim($site_url, '/') . '/' . ltrim($row['featured_image'], '/');
+                    }
                 } else {
-                    $row['featured_image'] = '';
+                    // Try to get image URL from wp_postmeta
+                    $meta_query = "
+                        SELECT meta_value 
+                        FROM wp_postmeta 
+                        WHERE post_id = {$row['featured_image_id']} AND meta_key = '_wp_attached_file'
+                    ";
+                    $meta_result = $conn->query($meta_query);
+                    
+                    if ($meta_result && $meta_result->num_rows > 0) {
+                        $meta = $meta_result->fetch_assoc();
+                        $upload_dir = wp_upload_dir();
+                        $row['featured_image'] = $upload_dir['baseurl'] . '/' . $meta['meta_value'];
+                    } else {
+                        $row['featured_image'] = '';
+                    }
                 }
                 
                 unset($row['featured_image_id']);
@@ -199,6 +318,59 @@ function handle_get_request() {
                 $row['featured_image'] = '';
             }
             unset($row['direct_featured_image']); // Remove this field from the response
+            
+            // If no featured image was found, try to get the banner image from ACF field
+            if (empty($row['featured_image'])) {
+                $banner_query = "
+                    SELECT meta_value 
+                    FROM wp_postmeta 
+                    WHERE post_id = {$row['id']} AND meta_key = 'destination_detail__banner_image'
+                    LIMIT 1
+                ";
+                $banner_result = $conn->query($banner_query);
+                
+                if ($banner_result && $banner_result->num_rows > 0) {
+                    $banner = $banner_result->fetch_assoc();
+                    $banner_id = $banner['meta_value'];
+                    
+                    if (!empty($banner_id)) {
+                        // First try to get the image URL from wp_posts
+                        $banner_image_query = "
+                            SELECT guid 
+                            FROM wp_posts 
+                            WHERE ID = {$banner_id} AND post_type = 'attachment'
+                            LIMIT 1
+                        ";
+                        $banner_image_result = $conn->query($banner_image_query);
+                        
+                        if ($banner_image_result && $banner_image_result->num_rows > 0) {
+                            $banner_image = $banner_image_result->fetch_assoc();
+                            $row['featured_image'] = $banner_image['guid'];
+                            
+                            // If the guid doesn't start with http, it might be a relative URL
+                            if (!empty($row['featured_image']) && substr($row['featured_image'], 0, 4) !== 'http') {
+                                $site_url = get_site_url();
+                                $row['featured_image'] = rtrim($site_url, '/') . '/' . ltrim($row['featured_image'], '/');
+                            }
+                        } else {
+                            // Try to get image URL from wp_postmeta
+                            $banner_meta_query = "
+                                SELECT meta_value 
+                                FROM wp_postmeta 
+                                WHERE post_id = {$banner_id} AND meta_key = '_wp_attached_file'
+                                LIMIT 1
+                            ";
+                            $banner_meta_result = $conn->query($banner_meta_query);
+                            
+                            if ($banner_meta_result && $banner_meta_result->num_rows > 0) {
+                                $banner_meta = $banner_meta_result->fetch_assoc();
+                                $upload_dir = wp_upload_dir();
+                                $row['featured_image'] = $upload_dir['baseurl'] . '/' . $banner_meta['meta_value'];
+                            }
+                        }
+                    }
+                }
+            }
             
             // No fallback images - we only use what's in the database
             
@@ -237,6 +409,152 @@ function handle_get_request() {
             'data' => $destinations
         ]);
     }
+}
+
+/**
+ * Debug function to check image data being retrieved
+ */
+function debug_image_data() {
+    $conn = get_database_connection();
+    $data = [];
+    
+    // Get site URL information
+    $data['site_url'] = get_site_url();
+    
+    // Get upload directory information
+    $data['upload_dir'] = wp_upload_dir();
+    
+    // Get a sample of destinations with their image data
+    $query = "
+        SELECT 
+            p.ID as id,
+            p.post_title as name,
+            (SELECT pm.meta_value FROM wp_postmeta pm WHERE pm.post_id = p.ID AND pm.meta_key = '_thumbnail_id' LIMIT 1) as featured_image_id
+        FROM 
+            wp_posts p
+        WHERE 
+            p.post_type = 'location'
+            AND p.post_status = 'publish'
+        LIMIT 5
+    ";
+    
+    $result = $conn->query($query);
+    
+    if (!$result) {
+        $data['error'] = "SQL Error: " . $conn->error;
+    } else {
+        $data['destinations'] = [];
+        
+        while ($destination = $result->fetch_assoc()) {
+            $dest_data = [
+                'id' => $destination['id'],
+                'name' => $destination['name'],
+                'featured_image_id' => $destination['featured_image_id'],
+                'image_data' => []
+            ];
+            
+            // If there's a featured image ID, get full data
+            if (!empty($destination['featured_image_id'])) {
+                // Get guid from wp_posts
+                $image_query = "
+                    SELECT p.ID, p.guid, p.post_title, p.post_type, p.post_mime_type
+                    FROM wp_posts p
+                    WHERE p.ID = ?
+                ";
+                
+                $image_stmt = $conn->prepare($image_query);
+                $image_stmt->bind_param("i", $destination['featured_image_id']);
+                $image_stmt->execute();
+                $image_result = $image_stmt->get_result();
+                
+                if ($image_result && $image_result->num_rows > 0) {
+                    $dest_data['image_data']['wp_posts'] = $image_result->fetch_assoc();
+                } else {
+                    $dest_data['image_data']['wp_posts'] = 'Not found';
+                }
+                
+                $image_stmt->close();
+                
+                // Get metadata from wp_postmeta
+                $meta_query = "
+                    SELECT meta_key, meta_value
+                    FROM wp_postmeta
+                    WHERE post_id = ?
+                    AND (
+                        meta_key = '_wp_attached_file' 
+                        OR meta_key LIKE '%thumbnail%'
+                        OR meta_key LIKE '%image%'
+                    )
+                ";
+                
+                $meta_stmt = $conn->prepare($meta_query);
+                $meta_stmt->bind_param("i", $destination['featured_image_id']);
+                $meta_stmt->execute();
+                $meta_result = $meta_stmt->get_result();
+                
+                if ($meta_result && $meta_result->num_rows > 0) {
+                    $dest_data['image_data']['wp_postmeta'] = [];
+                    
+                    while ($meta = $meta_result->fetch_assoc()) {
+                        $dest_data['image_data']['wp_postmeta'][] = $meta;
+                    }
+                    
+                    // Generate complete URL examples
+                    if (count($dest_data['image_data']['wp_postmeta']) > 0) {
+                        $dest_data['image_data']['url_examples'] = [];
+                        
+                        foreach ($dest_data['image_data']['wp_postmeta'] as $meta) {
+                            if ($meta['meta_key'] === '_wp_attached_file') {
+                                $dest_data['image_data']['url_examples'][] = [
+                                    'description' => 'Standard WP URL',
+                                    'url' => $data['upload_dir']['baseurl'] . '/' . $meta['meta_value']
+                                ];
+                            }
+                        }
+                        
+                        // Add the guid as an example
+                        if (isset($dest_data['image_data']['wp_posts']['guid'])) {
+                            $guid = $dest_data['image_data']['wp_posts']['guid'];
+                            
+                            $dest_data['image_data']['url_examples'][] = [
+                                'description' => 'Using GUID directly',
+                                'url' => $guid
+                            ];
+                            
+                            // If GUID doesn't start with http
+                            if (substr($guid, 0, 4) !== 'http') {
+                                $dest_data['image_data']['url_examples'][] = [
+                                    'description' => 'GUID with site URL prepended',
+                                    'url' => rtrim($data['site_url'], '/') . '/' . ltrim($guid, '/')
+                                ];
+                            }
+                        }
+                    }
+                } else {
+                    $dest_data['image_data']['wp_postmeta'] = 'No relevant metadata found';
+                }
+                
+                $meta_stmt->close();
+            }
+            
+            $data['destinations'][] = $dest_data;
+        }
+    }
+    
+    $conn->close();
+    
+    // Include DB connection info
+    $data['db_info'] = [
+        'host' => getenv('DB_HOST') ?: 'mysql-charterhub-charterhub.c.aivencloud.com',
+        'port' => getenv('DB_PORT') ?: '19174',
+        'name' => getenv('DB_NAME') ?: 'defaultdb'
+    ];
+    
+    json_response([
+        'success' => true,
+        'message' => 'Debug data for image retrieval',
+        'data' => $data
+    ]);
 }
 
 // Helper function to determine if a string is serialized
@@ -318,4 +636,55 @@ function get_default_image_for_destination($destination_name) {
     // This function is now disabled as we only want to use images from the database
     // Return empty string to indicate no image is available
     return '';
+}
+
+// Get the site URL
+function get_site_url() {
+    // Try to get site URL from wp_options
+    $conn = get_database_connection();
+    $query = "SELECT option_value FROM wp_options WHERE option_name = 'siteurl' LIMIT 1";
+    $result = $conn->query($query);
+    
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $siteurl = $row['option_value'];
+        $conn->close();
+        return $siteurl;
+    }
+    
+    $conn->close();
+    
+    // Default URL if not found in database
+    $protocol = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return $protocol . $host;
+}
+
+// Get WordPress upload directory information
+function wp_upload_dir() {
+    // Get the site URL
+    $siteurl = get_site_url();
+    
+    // Get the upload directory from wp_options
+    $conn = get_database_connection();
+    $query = "SELECT option_value FROM wp_options WHERE option_name = 'upload_path' LIMIT 1";
+    $result = $conn->query($query);
+    
+    $upload_path = '';
+    if ($result && $result->num_rows > 0) {
+        $row = $result->fetch_assoc();
+        $upload_path = $row['option_value'];
+    }
+    
+    $conn->close();
+    
+    // Default WordPress uploads structure
+    if (empty($upload_path)) {
+        $upload_path = 'wp-content/uploads';
+    }
+    
+    return [
+        'basedir' => $upload_path,
+        'baseurl' => rtrim($siteurl, '/') . '/' . $upload_path
+    ];
 } 
