@@ -8,8 +8,11 @@
  * - GET: Retrieve bookings where the authenticated user is either the main charterer or a guest
  * - POST: Create a new booking (currently empty, to be implemented)
  * 
- * Version: 1.1.3 - Fixed strict content-type and HTML prevention
+ * Version: 1.1.4 - Improved output buffering and header handling
  */
+
+// Start output buffering immediately
+ob_start();
 
 // Force JSON response type - even before anything else
 header('Content-Type: application/json');
@@ -18,198 +21,102 @@ header('Content-Type: application/json');
 @ini_set('display_errors', 0);
 error_reporting(0);
 
-// Start output buffering
-ob_start();
-
 // Define the CHARTERHUB_LOADED constant
 if (!defined('CHARTERHUB_LOADED')) {
     define('CHARTERHUB_LOADED', true);
 }
+
+// Capture any unexpected output from included files
+$unexpected_output = ob_get_clean();
+ob_start(); // Start a new buffer
 
 // Include essential dependencies for debugging
 require_once __DIR__ . '/../../utils/database.php';
 
 // Simple debug endpoint that doesn't require authentication and bypasses CORS
 if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
-    // Re-enable error display for this debug endpoint
-    error_reporting(E_ALL);
-    ini_set('display_errors', 1);
+    // Debug data
+    $debug_data = [
+        'time' => date('Y-m-d H:i:s'),
+        'request' => $_SERVER['REQUEST_URI'],
+        'method' => $_SERVER['REQUEST_METHOD'],
+    ];
     
     try {
-        // Skip authentication for this endpoint
-        error_log("BOOKINGS.PHP - Running connection test debug endpoint");
+        $conn = get_database_connection();
+        $debug_data['status'] = 'connected';
         
-        // Test basic database connectivity using the new connection function
-        $conn = get_bookings_db_connection();
-        
-        if (!$conn) {
-            // Special response for debug endpoint - no CORS needed
-            echo json_encode([
-                'success' => false,
-                'message' => 'Failed to connect to database',
-                'php_version' => PHP_VERSION,
-                'server_time' => date('Y-m-d H:i:s')
-            ]);
-            exit;
-        }
-        
-        // Get complete list of tables
+        // Get available tables in database
+        $tables_query = "SHOW TABLES";
+        $tables_result = $conn->query($tables_query);
         $tables = [];
-        $tables_result = $conn->query("SHOW TABLES");
         
-        if ($tables_result) {
-            while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
-                $tables[] = $row[0];
-            }
+        while ($row = $tables_result->fetch_array()) {
+            $tables[] = $row[0];
         }
         
-        // Find potential booking tables
-        $booking_tables = [];
-        foreach ($tables as $table) {
-            if (strpos(strtolower($table), 'booking') !== false) {
-                $booking_tables[] = $table;
-            }
+        $debug_data['available_tables'] = $tables;
+        
+        // Check which booking table exists
+        $booking_table = '';
+        if (in_array('wp_charterhub_bookings', $tables)) {
+            $booking_table = 'wp_charterhub_bookings';
+        } elseif (in_array('charterhub_bookings', $tables)) {
+            $booking_table = 'charterhub_bookings';
         }
         
-        // Find potential user tables
-        $user_tables = [];
-        foreach ($tables as $table) {
-            if (strpos(strtolower($table), 'user') !== false) {
-                $user_tables[] = $table;
-            }
-        }
+        $debug_data['bookings_table'] = $booking_table;
         
-        // Find the best bookings table
-        $bookings_table = null;
-        foreach ($booking_tables as $table) {
-            if (strpos($table, 'charterhub_bookings') !== false) {
-                $bookings_table = $table;
-                break;
-            }
-        }
-        
-        if (!$bookings_table && !empty($booking_tables)) {
-            $bookings_table = $booking_tables[0];
-        }
-        
-        // Get booking table structure if found
-        $booking_columns = [];
-        if ($bookings_table) {
-            $describe_result = $conn->query("DESCRIBE `{$bookings_table}`");
+        // Get columns for booking table
+        if (!empty($booking_table)) {
+            $columns_query = "SHOW COLUMNS FROM $booking_table";
+            $columns_result = $conn->query($columns_query);
+            $columns = [];
             
-            if ($describe_result) {
-                while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
-                    $booking_columns[] = $row['Field'];
-                }
+            while ($row = $columns_result->fetch_assoc()) {
+                $columns[] = $row['Field'];
             }
-        }
-        
-        // Determine charterer column
-        $charterer_column = 'unknown';
-        if (in_array('main_charterer_id', $booking_columns)) {
-            $charterer_column = 'main_charterer_id';
-        } elseif (in_array('customer_id', $booking_columns)) {
+            
+            $debug_data['table_columns'] = $columns;
+            
+            // Determine which column is used for the charterer
             $charterer_column = 'customer_id';
-        }
-        
-        // Check if sample query would work
-        $query_check = [
-            'would_work' => false,
-            'error' => null
-        ];
-        
-        try {
-            if ($bookings_table) {
-                // Try to prepare the booking query with a sample user
-                $test_user_id = 1;
-                
-                $test_query = "SELECT id FROM `{$bookings_table}` WHERE {$charterer_column} = ? LIMIT 1";
-                $stmt = $conn->prepare($test_query);
-                
-                if ($stmt) {
-                    $stmt->execute([$test_user_id]);
-                    $query_check['would_work'] = true;
-                }
+            if (in_array('main_charterer_id', $columns)) {
+                $charterer_column = 'main_charterer_id';
+            } elseif (in_array('user_id', $columns)) {
+                $charterer_column = 'user_id';
             }
-        } catch (Exception $qe) {
-            $query_check['error'] = $qe->getMessage();
+            
+            $debug_data['charterer_column'] = $charterer_column;
+            
+            // Check if customer_id column exists
+            $debug_data['has_customer_id'] = in_array('customer_id', $columns);
+            $debug_data['has_main_charterer_id'] = in_array('main_charterer_id', $columns);
+            
+            // Try to retrieve bookings count for a test user
+            $test_user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 505;
+            $count_query = "SELECT COUNT(*) as count FROM $booking_table WHERE $charterer_column = ?";
+            $stmt = $conn->prepare($count_query);
+            $stmt->bind_param('i', $test_user_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $count_data = $result->fetch_assoc();
+            
+            $debug_data['user_id_tested'] = $test_user_id;
+            $debug_data['bookings_count'] = $count_data['count'];
         }
         
-        // Add bookings diagnosis for current user if provided
-        $user_bookings_check = null;
-        if (isset($_GET['user_id']) && is_numeric($_GET['user_id'])) {
-            $test_user_id = (int)$_GET['user_id'];
-            try {
-                $user_query = "SELECT * FROM `{$bookings_table}` WHERE {$charterer_column} = ? LIMIT 5";
-                $user_stmt = $conn->prepare($user_query);
-                
-                if ($user_stmt) {
-                    $user_stmt->execute([$test_user_id]);
-                    $rows = $user_stmt->fetchAll(PDO::FETCH_ASSOC);
-                    
-                    $user_bookings_check = [
-                        'user_id' => $test_user_id,
-                        'found_bookings' => count($rows),
-                        'sample_rows' => $rows
-                    ];
-                }
-            } catch (Exception $ue) {
-                $user_bookings_check = [
-                    'user_id' => $test_user_id,
-                    'error' => $ue->getMessage()
-                ];
-            }
-        }
+        // Check if token was provided
+        $headers = apache_request_headers();
+        $token_provided = isset($headers['Authorization']);
+        $debug_data['token_provided'] = $token_provided;
         
-        // Database connection information
-        $db_info = [
-            'driver' => $conn->getAttribute(PDO::ATTR_DRIVER_NAME),
-            'server_version' => $conn->getAttribute(PDO::ATTR_SERVER_VERSION),
-            'client_version' => $conn->getAttribute(PDO::ATTR_CLIENT_VERSION),
-            'connection_status' => $conn->getAttribute(PDO::ATTR_CONNECTION_STATUS)
-        ];
-        
-        // Server environment
-        $server_env = [
-            'php_version' => PHP_VERSION,
-            'server_time' => date('Y-m-d H:i:s'),
-            'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
-            'document_root' => $_SERVER['DOCUMENT_ROOT'] ?? 'unknown',
-            'script_filename' => $_SERVER['SCRIPT_FILENAME'] ?? 'unknown',
-            'memory_limit' => ini_get('memory_limit'),
-            'max_execution_time' => ini_get('max_execution_time')
-        ];
-        
-        // Direct output for debug endpoint - no CORS needed
-        echo json_encode([
-            'success' => true,
-            'message' => 'Database connection test complete',
-            'db_connection' => 'Connected successfully',
-            'tables_count' => count($tables),
-            'booking_tables_found' => $booking_tables,
-            'user_tables_found' => $user_tables,
-            'best_bookings_table' => $bookings_table,
-            'booking_columns' => $booking_columns,
-            'charterer_column' => $charterer_column,
-            'query_test' => $query_check,
-            'user_bookings_check' => $user_bookings_check,
-            'database_info' => $db_info,
-            'server_environment' => $server_env
-        ]);
-        exit;
     } catch (Exception $e) {
-        // Direct output for debug endpoint - no CORS needed
-        echo json_encode([
-            'success' => false,
-            'message' => 'Error in database test',
-            'error' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-            'php_version' => PHP_VERSION,
-            'trace' => $e->getTraceAsString()
-        ]);
-        exit;
+        $debug_data['status'] = 'error';
+        $debug_data['message'] = $e->getMessage();
     }
+    
+    debug_json_response($debug_data);
 }
 
 // Process special debug requests before CORS handling
@@ -320,10 +227,10 @@ try {
     $cors_result = apply_cors_headers(['GET', 'POST', 'OPTIONS']);
     if (!$cors_result) {
         error_log("BOOKINGS.PHP - CORS check failed for origin: {$incoming_origin}");
-        ob_clean();
+    ob_clean();
         header('Content-Type: application/json');
-        echo json_encode([
-            'success' => false,
+    echo json_encode([
+        'success' => false,
             'message' => 'CORS error: Origin not allowed',
             'error' => 'cors_error',
             'origin' => $incoming_origin
@@ -609,15 +516,15 @@ function handle_get_request($user) {
                 $columns = $describe_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
                 
                 error_log("BOOKINGS.PHP - Found columns in bookings table: " . implode(", ", $columns));
-                
-                // Check if main_charterer_id or customer_id is used
-                if (in_array('main_charterer_id', $columns)) {
-                    $charterer_column = 'main_charterer_id';
+            
+            // Check if main_charterer_id or customer_id is used
+            if (in_array('main_charterer_id', $columns)) {
+                $charterer_column = 'main_charterer_id';
                     error_log("BOOKINGS.PHP - Using main_charterer_id column");
                 } else if (in_array('customer_id', $columns)) {
-                    $charterer_column = 'customer_id';
+                $charterer_column = 'customer_id';
                     error_log("BOOKINGS.PHP - Using customer_id column");
-                } else {
+            } else {
                     error_log("BOOKINGS.PHP - No charterer column found, using default: {$charterer_column}");
                 }
             } catch (Exception $column_e) {
@@ -787,13 +694,13 @@ function handle_get_request($user) {
                 
                 // Return response
                 bookings_json_response([
-                    'success' => true,
-                    'message' => 'Bookings retrieved successfully',
+                'success' => true,
+                'message' => 'Bookings retrieved successfully',
                     'data' => $bookings,
                     'total' => $total,
                     'limit' => $limit,
                     'offset' => $offset
-                ]);
+            ]);
             }
         } catch (Exception $query_e) {
             error_log("BOOKINGS.PHP - Error in query processing: " . $query_e->getMessage());
@@ -1064,6 +971,37 @@ function sanitize_data_for_json($data) {
         // Return scalars and nulls unchanged
         return $data;
     }
+}
+
+/**
+ * Debug JSON Response
+ * 
+ * Properly formats and outputs JSON for debug endpoints with proper buffer handling
+ * 
+ * @param array $data The data to convert to JSON
+ * @return void
+ */
+function debug_json_response($data) {
+    // Clear any existing output buffers
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    
+    // Start fresh buffer
+    ob_start();
+    
+    // Set appropriate headers
+    header('Content-Type: application/json');
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    
+    // Encode and output the data
+    echo json_encode($data, JSON_PRETTY_PRINT);
+    
+    // Flush buffer and exit
+    ob_end_flush();
+    exit();
 }
 
 // We're using the get_database_connection function from jwt-auth.php
