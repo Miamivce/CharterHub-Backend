@@ -522,38 +522,19 @@ function get_refresh_token_from_cookie() {
 }
 
 /**
- * Invalidate all tokens for a user by incrementing their token version
+ * Invalidate all tokens for a user by incrementing their token version and blacklisting existing tokens
  * 
- * @param int $user_id User ID
- * @return bool True on success
+ * @param int $user_id The user ID to invalidate tokens for
+ * @return bool Whether the operation was successful
  */
-function invalidate_all_user_tokens($user_id) {
-    if (!$user_id) {
-        return false;
-    }
-    
+function core_invalidate_all_user_tokens($user_id) {
     try {
-        // Begin transaction
         beginTransaction();
         
-        // Get current token version
-        $user = fetchRow(
-            "SELECT token_version FROM wp_charterhub_users WHERE id = ?",
-            [$user_id]
-        );
-        
-        if (!$user) {
-            rollbackTransaction();
-            return false;
-        }
-        
-        // Increment token version
-        $new_version = isset($user['token_version']) ? $user['token_version'] + 1 : 1;
-        
-        // Update token version
+        // Update token version in the users table
         $updated = executeUpdate(
-            "UPDATE wp_charterhub_users SET token_version = ? WHERE id = ?",
-            [$new_version, $user_id]
+            "UPDATE wp_charterhub_users SET token_version = token_version + 1 WHERE id = ?",
+            [$user_id]
         );
         
         if ($updated) {
