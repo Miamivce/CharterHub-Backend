@@ -26,7 +26,166 @@ if (!defined('CHARTERHUB_LOADED')) {
     define('CHARTERHUB_LOADED', true);
 }
 
-// Include only essential dependencies first
+// Include essential dependencies for debugging
+require_once __DIR__ . '/../../utils/database.php';
+
+// Simple debug endpoint that doesn't require authentication and bypasses CORS
+if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
+    // Re-enable error display for this debug endpoint
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    
+    try {
+        // Skip authentication for this endpoint
+        error_log("BOOKINGS.PHP - Running connection test debug endpoint");
+        
+        // Test basic database connectivity using the new connection function
+        $conn = get_bookings_db_connection();
+        
+        if (!$conn) {
+            // Special response for debug endpoint - no CORS needed
+            echo json_encode([
+                'success' => false,
+                'message' => 'Failed to connect to database',
+                'php_version' => PHP_VERSION,
+                'server_time' => date('Y-m-d H:i:s')
+            ]);
+            exit;
+        }
+        
+        // Get complete list of tables
+        $tables = [];
+        $tables_result = $conn->query("SHOW TABLES");
+        
+        if ($tables_result) {
+            while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
+                $tables[] = $row[0];
+            }
+        }
+        
+        // Find potential booking tables
+        $booking_tables = [];
+        foreach ($tables as $table) {
+            if (strpos(strtolower($table), 'booking') !== false) {
+                $booking_tables[] = $table;
+            }
+        }
+        
+        // Find potential user tables
+        $user_tables = [];
+        foreach ($tables as $table) {
+            if (strpos(strtolower($table), 'user') !== false) {
+                $user_tables[] = $table;
+            }
+        }
+        
+        // Find the best bookings table
+        $bookings_table = null;
+        foreach ($booking_tables as $table) {
+            if (strpos($table, 'charterhub_bookings') !== false) {
+                $bookings_table = $table;
+                break;
+            }
+        }
+        
+        if (!$bookings_table && !empty($booking_tables)) {
+            $bookings_table = $booking_tables[0];
+        }
+        
+        // Get booking table structure if found
+        $booking_columns = [];
+        if ($bookings_table) {
+            $describe_result = $conn->query("DESCRIBE `{$bookings_table}`");
+            
+            if ($describe_result) {
+                while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
+                    $booking_columns[] = $row['Field'];
+                }
+            }
+        }
+        
+        // Determine charterer column
+        $charterer_column = 'unknown';
+        if (in_array('main_charterer_id', $booking_columns)) {
+            $charterer_column = 'main_charterer_id';
+        } elseif (in_array('customer_id', $booking_columns)) {
+            $charterer_column = 'customer_id';
+        }
+        
+        // Check if sample query would work
+        $query_check = [
+            'would_work' => false,
+            'error' => null
+        ];
+        
+        try {
+            if ($bookings_table) {
+                // Try to prepare the booking query with a sample user
+                $test_user_id = 1;
+                
+                $test_query = "SELECT id FROM `{$bookings_table}` WHERE {$charterer_column} = ? LIMIT 1";
+                $stmt = $conn->prepare($test_query);
+                
+                if ($stmt) {
+                    $stmt->execute([$test_user_id]);
+                    $query_check['would_work'] = true;
+                }
+            }
+        } catch (Exception $qe) {
+            $query_check['error'] = $qe->getMessage();
+        }
+        
+        // Database connection information
+        $db_info = [
+            'driver' => $conn->getAttribute(PDO::ATTR_DRIVER_NAME),
+            'server_version' => $conn->getAttribute(PDO::ATTR_SERVER_VERSION),
+            'client_version' => $conn->getAttribute(PDO::ATTR_CLIENT_VERSION),
+            'connection_status' => $conn->getAttribute(PDO::ATTR_CONNECTION_STATUS)
+        ];
+        
+        // Server environment
+        $server_env = [
+            'php_version' => PHP_VERSION,
+            'server_time' => date('Y-m-d H:i:s'),
+            'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+            'document_root' => $_SERVER['DOCUMENT_ROOT'] ?? 'unknown',
+            'script_filename' => $_SERVER['SCRIPT_FILENAME'] ?? 'unknown',
+            'memory_limit' => ini_get('memory_limit'),
+            'max_execution_time' => ini_get('max_execution_time')
+        ];
+        
+        // Direct output for debug endpoint - no CORS needed
+        echo json_encode([
+            'success' => true,
+            'message' => 'Database connection test complete',
+            'db_connection' => 'Connected successfully',
+            'tables_count' => count($tables),
+            'booking_tables_found' => $booking_tables,
+            'user_tables_found' => $user_tables,
+            'best_bookings_table' => $bookings_table,
+            'booking_columns' => $booking_columns,
+            'charterer_column' => $charterer_column,
+            'query_test' => $query_check,
+            'database_info' => $db_info,
+            'server_environment' => $server_env
+        ]);
+        exit;
+    } catch (Exception $e) {
+        // Direct output for debug endpoint - no CORS needed
+        echo json_encode([
+            'success' => false,
+            'message' => 'Error in database test',
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'php_version' => PHP_VERSION,
+            'trace' => $e->getTraceAsString()
+        ]);
+        exit;
+    }
+}
+
+// Include CORS dependencies for normal API usage
 require_once __DIR__ . '/../../auth/global-cors.php';
 
 // Apply CORS headers with proper cleaning
@@ -53,7 +212,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 // Now we can include other dependencies
-require_once __DIR__ . '/../../utils/database.php';
 require_once __DIR__ . '/../../auth/jwt-auth.php';
 
 // Set custom error handler to force JSON responses
@@ -87,6 +245,7 @@ set_exception_handler(function($exception) {
 function get_bookings_db_connection() {
     try {
         // First try the standard connection
+        error_log("BOOKINGS.PHP - Attempting primary database connection");
         return getDbConnection();
     } catch (Exception $e) {
         error_log("BOOKINGS.PHP - Primary database connection failed: " . $e->getMessage());
@@ -94,123 +253,55 @@ function get_bookings_db_connection() {
         // Try a direct connection from config
         try {
             require_once __DIR__ . '/../../auth/config.php';
+            error_log("BOOKINGS.PHP - Attempting config-based connection");
             return get_db_connection_from_config();
         } catch (Exception $config_e) {
             error_log("BOOKINGS.PHP - Config connection failed: " . $config_e->getMessage());
             
             // Last resort - try fallback connection from environment variables
             try {
-                // Cloud database settings
-                $host = 'mysql-charterhub-charterhub.c.aivencloud.com';
-                $port = '19174';
-                $dbname = 'defaultdb';
-                $username = 'avnadmin';
-                $password = 'AVNS_HCZbm5bZJE1L9C8Pz8C';
+                error_log("BOOKINGS.PHP - Attempting PDO fallback connection with environment variables");
+                
+                // Try to get credentials from environment first
+                $host = getenv('DB_HOST') ?: 'mysql-charterhub-charterhub.c.aivencloud.com';
+                $port = getenv('DB_PORT') ?: '19174';
+                $dbname = getenv('DB_NAME') ?: 'defaultdb';
+                $username = getenv('DB_USER') ?: 'avnadmin';
+                $password = getenv('DB_PASSWORD') ?: 'AVNS_HCZbm5bZJE1L9C8Pz8C';
+                
+                error_log("BOOKINGS.PHP - Using host: {$host}, port: {$port}, dbname: {$dbname}");
                 
                 // Build DSN
                 $dsn = "mysql:host={$host};port={$port};dbname={$dbname}";
                 
-                // Enable SSL with verification disabled
+                // Enable SSL with verification disabled for cloud database
                 $options = [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
                 ];
                 
+                // Disable SSL certificate verification (needed for some cloud DBs)
+                if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+                    $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+                    error_log("BOOKINGS.PHP - Disabled SSL certificate verification");
+                }
+                
                 error_log("BOOKINGS.PHP - Attempting emergency fallback connection");
-                return new PDO($dsn, $username, $password, $options);
+                $pdo = new PDO($dsn, $username, $password, $options);
+                
+                // Test the connection with a simple query
+                $test = $pdo->query("SELECT 1");
+                if (!$test) {
+                    throw new Exception("Connection test query failed");
+                }
+                
+                error_log("BOOKINGS.PHP - Fallback connection successful");
+                return $pdo;
             } catch (Exception $fallback_e) {
-                error_log("BOOKINGS.PHP - All database connection attempts failed");
-                throw new Exception("Failed to establish any database connection");
+                error_log("BOOKINGS.PHP - All database connection attempts failed: " . $fallback_e->getMessage());
+                throw new Exception("Failed to establish any database connection: " . $fallback_e->getMessage());
             }
         }
-    }
-}
-
-// Simple debug endpoint that doesn't require authentication
-if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
-    // Re-enable error display for this debug endpoint
-    error_reporting(E_ALL);
-    ini_set('display_errors', 1);
-    
-    try {
-        // Test basic database connectivity using the new connection function
-        $conn = get_bookings_db_connection();
-        
-        if (!$conn) {
-            json_response([
-                'success' => false,
-                'message' => 'Failed to connect to database',
-                'php_version' => PHP_VERSION,
-                'server_time' => date('Y-m-d H:i:s')
-            ], 500);
-        }
-        
-        // Look for tables with or without prefix
-        $tables = [];
-        $tables_result = $conn->query("SHOW TABLES");
-        
-        if ($tables_result) {
-            while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
-                $tables[] = $row[0];
-            }
-        }
-        
-        // Find bookings table
-        $bookings_table = null;
-        foreach ($tables as $table) {
-            if (stripos($table, 'charterhub_bookings') !== false) {
-                $bookings_table = $table;
-                break;
-            }
-        }
-        
-        if (!$bookings_table) {
-            json_response([
-                'success' => false,
-                'message' => 'Bookings table not found',
-                'tables_found' => $tables,
-                'php_version' => PHP_VERSION,
-                'server_time' => date('Y-m-d H:i:s')
-            ], 404);
-        }
-        
-        // Get booking table structure
-        $booking_columns = [];
-        $describe_result = $conn->query("DESCRIBE " . $bookings_table);
-        
-        if ($describe_result) {
-            while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
-                $booking_columns[] = $row['Field'];
-            }
-        }
-        
-        // Determine charterer column
-        $charterer_column = in_array('main_charterer_id', $booking_columns) ? 'main_charterer_id' : 
-                          (in_array('customer_id', $booking_columns) ? 'customer_id' : 'not_found');
-        
-        json_response([
-            'success' => true,
-            'message' => 'Database connection test',
-            'php_version' => PHP_VERSION,
-            'server_time' => date('Y-m-d H:i:s'),
-            'tables_found' => $tables,
-            'bookings_table' => $bookings_table,
-            'booking_columns' => $booking_columns,
-            'charterer_column' => $charterer_column,
-            'connection_type' => 'Direct PDO connection with fallback',
-            'buffer_level' => ob_get_level()
-        ]);
-    } catch (Exception $e) {
-        json_response([
-            'success' => false,
-            'message' => 'Error in database test',
-            'error' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-            'php_version' => PHP_VERSION,
-            'trace' => $e->getTraceAsString()
-        ], 500);
     }
 }
 
@@ -303,61 +394,102 @@ function handle_get_request($user) {
         
         // Get user ID from authenticated token
         $user_id = $user['id'];
+        error_log("BOOKINGS.PHP - Processing request for user ID: {$user_id}");
         
         // Get specific booking if ID is provided
         $booking_id = isset($_GET['id']) ? intval($_GET['id']) : null;
         
-        // Determine the correct column name by checking table structure
-        $charterer_column = 'main_charterer_id'; // Default column name
-        $columns = [];
+        // Get a list of all tables in the database to find the ones we need
+        $tables = array();
+        $bookings_table = null;
+        $yachts_table = null;
+        $users_table = null;
+        $guests_table = null;
         
         try {
-            // First, check if the bookings table exists
-            $tables_query = "SHOW TABLES";
-            $tables_result = $conn->query($tables_query);
+            error_log("BOOKINGS.PHP - Checking available tables");
+            $tables_result = $conn->query("SHOW TABLES");
             
             if (!$tables_result) {
-                error_log("BOOKINGS.PHP - Error checking tables: " . $conn->errorInfo()[2]);
+                error_log("BOOKINGS.PHP - Error checking tables: " . implode(", ", $conn->errorInfo()));
                 throw new Exception("Error checking database tables");
             }
             
-            // Look for bookings table with or without prefix
-            $bookings_table = 'wp_charterhub_bookings'; // Default with prefix
-            $table_exists = false;
-            
             while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
                 $table_name = $row[0];
-                error_log("BOOKINGS.PHP - Found table: " . $table_name);
+                $tables[] = $table_name;
                 
-                if ($table_name === 'wp_charterhub_bookings' || $table_name === 'charterhub_bookings') {
+                // Find tables by pattern matching
+                if (strpos($table_name, 'charterhub_bookings') !== false) {
                     $bookings_table = $table_name;
-                    $table_exists = true;
-                    error_log("BOOKINGS.PHP - Found bookings table: " . $bookings_table);
-                    break;
+                    error_log("BOOKINGS.PHP - Found bookings table: {$table_name}");
+                }
+                
+                if (strpos($table_name, 'charterhub_yachts') !== false) {
+                    $yachts_table = $table_name;
+                    error_log("BOOKINGS.PHP - Found yachts table: {$table_name}");
+                }
+                
+                if (strpos($table_name, 'charterhub_users') !== false) {
+                    $users_table = $table_name;
+                    error_log("BOOKINGS.PHP - Found users table: {$table_name}");
+                }
+                
+                if (strpos($table_name, 'charterhub_booking_guests') !== false) {
+                    $guests_table = $table_name;
+                    error_log("BOOKINGS.PHP - Found booking guests table: {$table_name}");
                 }
             }
             
-            if (!$table_exists) {
-                error_log("BOOKINGS.PHP - No bookings table found in database");
-                throw new Exception("Bookings table not found in database");
+            // Check if we found all required tables
+            if (!$bookings_table) {
+                error_log("BOOKINGS.PHP - Bookings table not found in tables: " . implode(", ", $tables));
+                throw new Exception("Bookings table not found");
             }
             
-            // Check table columns
-            $describe_query = "DESCRIBE " . $bookings_table;
+            if (!$yachts_table) {
+                error_log("BOOKINGS.PHP - Yachts table not found, using fallback");
+                $yachts_table = 'wp_charterhub_yachts'; // Fallback
+            }
+            
+            if (!$users_table) {
+                error_log("BOOKINGS.PHP - Users table not found, using fallback");
+                $users_table = 'wp_charterhub_users'; // Fallback
+            }
+            
+            if (!$guests_table) {
+                error_log("BOOKINGS.PHP - Booking guests table not found, using fallback");
+                $guests_table = 'wp_charterhub_booking_guests'; // Fallback
+            }
+            
+            // Verify tables actually exist
+            foreach ([$bookings_table, $yachts_table, $users_table, $guests_table] as $table) {
+                $check = $conn->query("SHOW TABLES LIKE '{$table}'");
+                if ($check->rowCount() === 0) {
+                    error_log("BOOKINGS.PHP - Table does not exist: {$table}");
+                }
+            }
+            
+            // Get the column names for the bookings table
+            error_log("BOOKINGS.PHP - Getting columns for bookings table: {$bookings_table}");
+            $columns = [];
+            $describe_query = "DESCRIBE `{$bookings_table}`";
             $describe_result = $conn->query($describe_query);
             
             if (!$describe_result) {
-                error_log("BOOKINGS.PHP - Error describing table: " . $conn->errorInfo()[2]);
-                throw new Exception("Failed to get table structure");
+                error_log("BOOKINGS.PHP - Error describing table: " . implode(", ", $conn->errorInfo()));
+                throw new Exception("Failed to get bookings table structure");
             }
             
             while ($row = $describe_result->fetch(PDO::FETCH_ASSOC)) {
                 $columns[] = $row['Field'];
             }
             
-            error_log("BOOKINGS.PHP - Found columns: " . implode(", ", $columns));
+            error_log("BOOKINGS.PHP - Bookings table columns: " . implode(", ", $columns));
             
-            // Check if main_charterer_id or customer_id is used
+            // Determine which column to use for the charterer ID
+            $charterer_column = 'main_charterer_id'; // Default
+            
             if (in_array('main_charterer_id', $columns)) {
                 $charterer_column = 'main_charterer_id';
                 error_log("BOOKINGS.PHP - Using column: main_charterer_id");
@@ -365,52 +497,28 @@ function handle_get_request($user) {
                 $charterer_column = 'customer_id';
                 error_log("BOOKINGS.PHP - Using column: customer_id");
             } else {
-                error_log("BOOKINGS.PHP - Neither main_charterer_id nor customer_id found, columns available: " . implode(", ", $columns));
+                error_log("BOOKINGS.PHP - Neither main_charterer_id nor customer_id found");
                 throw new Exception("Required column not found in bookings table");
             }
             
-            // Also determine proper yachts table name
-            $yachts_table = 'wp_charterhub_yachts'; // Default
-            $yachts_query = "SHOW TABLES LIKE '%charterhub_yachts'";
-            $yachts_result = $conn->query($yachts_query);
-            
-            if ($yachts_result && $yachts_result->rowCount() > 0) {
-                $yacht_row = $yachts_result->fetch(PDO::FETCH_NUM);
-                $yachts_table = $yacht_row[0];
-                error_log("BOOKINGS.PHP - Found yachts table: " . $yachts_table);
-            }
-            
-            // Determine proper users table name
-            $users_table = 'wp_charterhub_users'; // Default
-            $users_query = "SHOW TABLES LIKE '%charterhub_users'";
-            $users_result = $conn->query($users_query);
-            
-            if ($users_result && $users_result->rowCount() > 0) {
-                $user_row = $users_result->fetch(PDO::FETCH_NUM);
-                $users_table = $user_row[0];
-                error_log("BOOKINGS.PHP - Found users table: " . $users_table);
-            }
-            
-            // Determine proper booking_guests table name
-            $guests_table = 'wp_charterhub_booking_guests'; // Default
-            $guests_query = "SHOW TABLES LIKE '%charterhub_booking_guests'";
-            $guests_result = $conn->query($guests_query);
-            
-            if ($guests_result && $guests_result->rowCount() > 0) {
-                $guest_row = $guests_result->fetch(PDO::FETCH_NUM);
-                $guests_table = $guest_row[0];
-                error_log("BOOKINGS.PHP - Found booking guests table: " . $guests_table);
-            }
         } catch (Exception $e) {
-            error_log("BOOKINGS.PHP - Error determining table structure: " . $e->getMessage());
-            // We'll try to continue with default table names
+            error_log("BOOKINGS.PHP - Error in table detection: " . $e->getMessage());
+            // Don't throw yet, we'll try with default names
             $bookings_table = 'wp_charterhub_bookings';
             $yachts_table = 'wp_charterhub_yachts';
             $users_table = 'wp_charterhub_users';
             $guests_table = 'wp_charterhub_booking_guests';
+            $charterer_column = 'main_charterer_id';
+            
+            error_log("BOOKINGS.PHP - Using default table names after error");
         }
         
-        error_log("BOOKINGS.PHP - Using charterer column: " . $charterer_column);
+        error_log("BOOKINGS.PHP - Final table selections:");
+        error_log("BOOKINGS.PHP - Bookings table: {$bookings_table}");
+        error_log("BOOKINGS.PHP - Yachts table: {$yachts_table}");
+        error_log("BOOKINGS.PHP - Users table: {$users_table}");
+        error_log("BOOKINGS.PHP - Guests table: {$guests_table}");
+        error_log("BOOKINGS.PHP - Using charterer column: {$charterer_column}");
         
         // Base query to get bookings where user is main charterer or guest
         $query = "SELECT 
@@ -426,11 +534,11 @@ function handle_get_request($user) {
                     u_main.last_name as main_charterer_last_name,
                     u_main.email as main_charterer_email,
                     b.created_at
-                  FROM " . $bookings_table . " b
-                  LEFT JOIN " . $yachts_table . " y ON b.yacht_id = y.id
-                  LEFT JOIN " . $users_table . " u_main ON b.{$charterer_column} = u_main.id
+                  FROM `{$bookings_table}` b
+                  LEFT JOIN `{$yachts_table}` y ON b.yacht_id = y.id
+                  LEFT JOIN `{$users_table}` u_main ON b.{$charterer_column} = u_main.id
                   WHERE (b.{$charterer_column} = ? OR 
-                        b.id IN (SELECT booking_id FROM " . $guests_table . " WHERE user_id = ?))";
+                        b.id IN (SELECT booking_id FROM `{$guests_table}` WHERE user_id = ?))";
         
         $params = [$user_id, $user_id];
         
@@ -448,16 +556,16 @@ function handle_get_request($user) {
         // Prepare and execute query using PDO
         $stmt = $conn->prepare($query);
         if (!$stmt) {
-            error_log("BOOKINGS.PHP - Failed to prepare query: " . $conn->errorInfo()[2]);
-            throw new Exception("Failed to prepare booking query");
+            error_log("BOOKINGS.PHP - Failed to prepare query: " . implode(", ", $conn->errorInfo()));
+            throw new Exception("Failed to prepare booking query: " . $conn->errorInfo()[2]);
         }
         
         // Execute with parameters
         $execute_result = $stmt->execute($params);
         
         if (!$execute_result) {
-            error_log("BOOKINGS.PHP - Failed to execute query: " . $stmt->errorInfo()[2]);
-            throw new Exception("Failed to execute booking query");
+            error_log("BOOKINGS.PHP - Failed to execute query: " . implode(", ", $stmt->errorInfo()));
+            throw new Exception("Failed to execute booking query: " . $stmt->errorInfo()[2]);
         }
         
         // Fetch all results at once
@@ -480,13 +588,13 @@ function handle_get_request($user) {
                                     u.first_name,
                                     u.last_name,
                                     u.email
-                                FROM " . $guests_table . " bg
-                                LEFT JOIN " . $users_table . " u ON bg.user_id = u.id
+                                FROM `{$guests_table}` bg
+                                LEFT JOIN `{$users_table}` u ON bg.user_id = u.id
                                 WHERE bg.booking_id = ?";
                 
                 $guests_stmt = $conn->prepare($guests_query);
                 if (!$guests_stmt) {
-                    error_log("BOOKINGS.PHP - Failed to prepare guests query: " . $conn->errorInfo()[2]);
+                    error_log("BOOKINGS.PHP - Failed to prepare guests query: " . implode(", ", $conn->errorInfo()));
                 } else {
                     $guests_stmt->execute([$booking_id]);
                     $guest_rows = $guests_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -501,7 +609,7 @@ function handle_get_request($user) {
                     }
                 }
             } catch (Exception $e) {
-                error_log("BOOKINGS.PHP - Error fetching guests for booking ID " . $booking_id . ": " . $e->getMessage());
+                error_log("BOOKINGS.PHP - Error fetching guests for booking ID {$booking_id}: " . $e->getMessage());
                 // Continue with empty guests array
             }
             
@@ -555,7 +663,10 @@ function handle_get_request($user) {
             'details' => $e->getMessage(),
             'diagnostics' => [
                 'php_version' => PHP_VERSION,
-                'column_detection' => true,
+                'user_id' => isset($user_id) ? $user_id : 'unknown',
+                'tables_found' => isset($tables) ? $tables : [],
+                'bookings_table' => isset($bookings_table) ? $bookings_table : 'unknown',
+                'charterer_column' => isset($charterer_column) ? $charterer_column : 'unknown',
                 'columns_found' => isset($columns) ? $columns : []
             ]
         ], 500);
