@@ -67,7 +67,8 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
         'https://charter-p2f5lp7ws-maurits-s-projects.vercel.app',
         'https://charter-hub.vercel.app',
         'https://charter-hub-git-main-maurits-s-projects.vercel.app',
-        'https://charter-hub-vercel.app'
+        'https://charter-hub-vercel.app',
+        'https://charter-hub.vercel.app/'  // Added trailing slash version
     ];
 
     // Combine environment origins with default origins

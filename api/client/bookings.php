@@ -220,13 +220,34 @@ if (ob_get_length()) {
     ob_clean();
 }
 
-// Apply CORS headers for all supported methods
-if (!apply_cors_headers(['GET', 'POST', 'OPTIONS'])) {
+// Record incoming request details for better debugging
+$incoming_origin = $_SERVER['HTTP_ORIGIN'] ?? 'none';
+$incoming_method = $_SERVER['REQUEST_METHOD'] ?? 'unknown';
+error_log("BOOKINGS.PHP - Request received from origin: {$incoming_origin}, method: {$incoming_method}");
+
+// Apply CORS headers for all supported methods - with better error handling
+try {
+    $cors_result = apply_cors_headers(['GET', 'POST', 'OPTIONS']);
+    if (!$cors_result) {
+        error_log("BOOKINGS.PHP - CORS check failed for origin: {$incoming_origin}");
+        ob_clean();
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => false,
+            'message' => 'CORS error: Origin not allowed',
+            'error' => 'cors_error',
+            'origin' => $incoming_origin
+        ]);
+        exit;
+    }
+} catch (Exception $cors_e) {
+    error_log("BOOKINGS.PHP - CORS exception: " . $cors_e->getMessage());
     ob_clean();
+    header('Content-Type: application/json');
     echo json_encode([
         'success' => false,
-        'message' => 'CORS error',
-        'error' => 'cors_error'
+        'message' => 'CORS error: ' . $cors_e->getMessage(),
+        'error' => 'cors_exception'
     ]);
     exit;
 }
@@ -709,13 +730,27 @@ function handle_get_request($user) {
             json_response([
                 'success' => true,
                 'message' => 'Booking retrieved successfully',
-                'data' => !empty($bookings) ? $bookings[0] : null
+                'data' => !empty($bookings) ? $bookings[0] : null,
+                'debug_info' => [
+                    'query_time' => microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'],
+                    'booking_count' => count($bookings),
+                    'user_id' => $user_id,
+                    'found_data' => !empty($bookings)
+                ]
             ]);
         } else {
+            // Even if no bookings found, return success with empty array
             json_response([
                 'success' => true,
-                'message' => 'Bookings retrieved successfully',
-                'data' => $bookings
+                'message' => count($bookings) > 0 ? 'Bookings retrieved successfully' : 'No bookings found for this user',
+                'data' => $bookings,
+                'debug_info' => [
+                    'query_time' => microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'],
+                    'booking_count' => count($bookings),
+                    'user_id' => $user_id,
+                    'table_name' => $bookings_table,
+                    'charterer_column' => $charterer_column
+                ]
             ]);
         }
     } catch (Exception $e) {
