@@ -31,6 +31,17 @@ require_once __DIR__ . '/jwt-core.php';
 require_once __DIR__ . '/global-cors.php';
 apply_global_cors(['GET', 'OPTIONS']);
 
+// Override default error handling
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    error_log("ME.PHP ERROR: [$errno] $errstr in $errfile on line $errline");
+    return false; // Continue with PHP's internal error handler
+});
+
+// Add debugging and performance monitoring
+$start_time = microtime(true);
+$request_id = uniqid('me_');
+error_log("ME.PHP [$request_id] Request started");
+
 // Debug endpoint for database connection check
 if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
     // Clear buffer
@@ -112,8 +123,24 @@ require_once dirname(__FILE__) . '/token-blacklist.php';
 
 header('Content-Type: application/json');
 
+// Add caching headers to improve performance
+// Cache for 5 minutes (300 seconds)
+header('Cache-Control: private, max-age=300');
+header('Expires: ' . gmdate('D, d M Y H:i:s', time() + 300) . ' GMT');
+
 // Define helper functions
 function json_response($data, $status = 200) {
+    global $start_time, $request_id;
+    
+    // Add execution time to response for debugging
+    $execution_time = microtime(true) - $start_time;
+    $data['_debug'] = [
+        'execution_time' => round($execution_time * 1000, 2) . 'ms',
+        'request_id' => $request_id
+    ];
+    
+    error_log("ME.PHP [$request_id] Request completed in {$data['_debug']['execution_time']}");
+    
     // Clear any existing output
     if (ob_get_level()) {
         ob_clean();
@@ -126,6 +153,13 @@ function json_response($data, $status = 200) {
 }
 
 function error_response($message, $status = 400, $code = null) {
+    global $start_time, $request_id;
+    
+    // Add execution time to error response for debugging
+    $execution_time = microtime(true) - $start_time;
+    
+    error_log("ME.PHP [$request_id] Error response: $message ($status) in {$execution_time}ms");
+    
     // Clear any existing output
     if (ob_get_level()) {
         ob_clean();
@@ -133,10 +167,19 @@ function error_response($message, $status = 400, $code = null) {
     
     http_response_code($status);
     header('Content-Type: application/json');
-    $response = ['success' => false, 'message' => $message];
+    $response = [
+        'success' => false, 
+        'message' => $message,
+        '_debug' => [
+            'execution_time' => round($execution_time * 1000, 2) . 'ms',
+            'request_id' => $request_id
+        ]
+    ];
+    
     if ($code) {
         $response['code'] = $code;
     }
+    
     echo json_encode($response);
     exit;
 }
@@ -158,7 +201,7 @@ try {
     $auth_header = isset($headers['Authorization']) ? $headers['Authorization'] : '';
     
     if (empty($auth_header) || strpos($auth_header, 'Bearer ') !== 0) {
-        error_log("Error in me.php: No valid Authorization header found");
+        error_log("ME.PHP [$request_id] No valid Authorization header found");
         error_response('No token provided', 401, 'token_missing');
     }
     
@@ -169,50 +212,69 @@ try {
     $payload = validate_token($token);
     
     if (!$payload) {
-        error_log("Error in me.php: Token validation failed");
+        error_log("ME.PHP [$request_id] Token validation failed");
         error_response('Invalid token', 401, 'invalid_token');
     }
     
     // Debug the payload structure
-    error_log("ME.PHP - Payload type: " . gettype($payload));
+    error_log("ME.PHP [$request_id] Payload type: " . gettype($payload));
     
     // Get the user ID from the payload
     $user_id = isset($payload->sub) ? $payload->sub : null;
     
-    error_log("ME.PHP - User ID extracted: " . ($user_id ?? 'null'));
+    error_log("ME.PHP [$request_id] User ID extracted: " . ($user_id ?? 'null'));
     
     if (!$user_id) {
-        error_log("Error in me.php: No user ID in token");
+        error_log("ME.PHP [$request_id] No user ID in token");
         error_response('Invalid token - no user ID', 401, 'no_user_id');
     }
     
     try {
-        // Get user from database with fetchRow for consistency
-        $user = fetchRow(
-            "SELECT id, email, first_name, last_name, phone_number, company, role, verified, token_version, created_at, last_login FROM wp_charterhub_users WHERE id = ?",
-            [$user_id]
-        );
+        // Get database connection
+        $conn = getDbConnection();
+        
+        // Find the correct user table name (with or without prefix)
+        $users_table = 'wp_charterhub_users'; // Default
+        $tables_result = $conn->query("SHOW TABLES");
+        
+        if ($tables_result) {
+            while ($row = $tables_result->fetch(PDO::FETCH_NUM)) {
+                if (stripos($row[0], 'charterhub_users') !== false) {
+                    $users_table = $row[0];
+                    error_log("ME.PHP [$request_id] Using users table: $users_table");
+                    break;
+                }
+            }
+        }
+        
+        // Direct PDO query for better performance
+        $stmt = $conn->prepare("SELECT id, email, first_name, last_name, phone_number, company, role, verified, token_version, created_at, last_login 
+                              FROM $users_table 
+                              WHERE id = ? 
+                              LIMIT 1");
+        $stmt->execute([$user_id]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
         
         if (!$user) {
-            error_log("Error in me.php: User ID $user_id not found in database");
+            error_log("ME.PHP [$request_id] User ID $user_id not found in database");
             error_response('User not found', 401, 'user_not_found');
         }
         
         // Verify token version matches
         $token_version = isset($payload->tvr) ? $payload->tvr : null;
         if ($token_version !== null && $user['token_version'] != $token_version) {
-            error_log("ME.PHP - Token version mismatch: token has {$token_version}, user has {$user['token_version']}");
+            error_log("ME.PHP [$request_id] Token version mismatch: token has {$token_version}, user has {$user['token_version']}");
             error_response('Token has been invalidated. Please login again.', 401, 'token_invalidated');
         }
         
-        error_log("ME.PHP - Successfully retrieved data for user ID: " . $user['id']);
+        error_log("ME.PHP [$request_id] Successfully retrieved data for user ID: " . $user['id']);
         
         // Format user data for response
         $formatted_user = [
             'id' => (int)$user['id'],
             'email' => $user['email'],
-            'firstName' => $user['first_name'],
-            'lastName' => $user['last_name'],
+            'firstName' => $user['first_name'] ?? '',
+            'lastName' => $user['last_name'] ?? '',
             'phoneNumber' => $user['phone_number'] ?? '',
             'company' => $user['company'] ?? '',
             'role' => $user['role'],
@@ -228,11 +290,11 @@ try {
         ]);
         
     } catch (Exception $db_e) {
-        error_log("ME.PHP - Database error: " . $db_e->getMessage());
+        error_log("ME.PHP [$request_id] Database error: " . $db_e->getMessage());
         error_response('Database error', 500, 'database_error');
     }
 } catch (Exception $e) {
-    error_log("ME.PHP - Unexpected error: " . $e->getMessage());
+    error_log("ME.PHP [$request_id] Unexpected error: " . $e->getMessage());
     error_response('Unexpected error', 500, 'server_error');
 }
 
