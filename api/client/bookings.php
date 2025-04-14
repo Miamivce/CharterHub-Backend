@@ -219,13 +219,14 @@ try {
     $incoming_method = $_SERVER['REQUEST_METHOD'] ?? 'unknown';
     error_log("BOOKINGS.PHP - Request received from origin: {$incoming_origin}, method: {$incoming_method}");
 
-    // Check if this is a direct debug or test request - allow it without CORS checks
+    // Check if this is a direct debug or test request or credentials mode
     if (isset($_GET['debug']) || (isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'Mozilla') !== false)) {
-        // For debug and browser requests, set specific origin (instead of wildcard) if provided
+        // For debug and browser requests with credentials
         if ($incoming_origin !== 'none') {
             header("Access-Control-Allow-Origin: $incoming_origin");
             header("Access-Control-Allow-Credentials: true");
         } else {
+            // Only use wildcard when no specific origin is provided
             header('Access-Control-Allow-Origin: *');
         }
         header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -377,16 +378,29 @@ error_log("Client bookings.php endpoint called with method: " . $_SERVER['REQUES
 
 // Verify JWT token for all requests
 error_log("BOOKINGS.PHP - Starting token verification");
-$auth_header = '';
-if (isset(getallheaders()['Authorization'])) {
-    $auth_header = getallheaders()['Authorization'];
-    error_log("BOOKINGS.PHP - Authorization header found: " . substr($auth_header, 0, 20) . "...");
-} else {
-    error_log("BOOKINGS.PHP - No Authorization header found");
-}
-
 try {
+    // Explicitly get the authorization header
+    $auth_header = null;
+    $headers = getallheaders();
+    
+    // Try different header naming conventions
+    foreach (['Authorization', 'authorization', 'HTTP_AUTHORIZATION'] as $header_name) {
+        if (isset($headers[$header_name])) {
+            $auth_header = $headers[$header_name];
+            error_log("BOOKINGS.PHP - Authorization header found in: {$header_name}");
+            break;
+        }
+    }
+    
+    if (!empty($auth_header)) {
+        error_log("BOOKINGS.PHP - Authorization header found: " . substr($auth_header, 0, 20) . "...");
+    } else {
+        error_log("BOOKINGS.PHP - No Authorization header found");
+    }
+    
+    // Call the verify_jwt_token function (without arguments)
     $user = verify_jwt_token();
+    
     if (!$user) {
         error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
         bookings_json_response([

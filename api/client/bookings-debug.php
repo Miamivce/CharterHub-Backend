@@ -193,18 +193,28 @@ try {
     // Check token validation
     if ($auth_header) {
         try {
-            $token = str_replace('Bearer ', '', $auth_header);
+            $token = null;
+            // Extract the token from the Authorization header
+            if (preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
+                $token = $matches[1];
+            }
+            
             $debug_info['auth']['token_provided'] = true;
             
-            $payload = verify_token($token);
-            if ($payload) {
-                $debug_info['auth']['token_valid'] = true;
-                $debug_info['auth']['user_id'] = $payload->sub;
-                $debug_info['auth']['role'] = $payload->role;
-                $debug_info['auth']['expiry'] = date('Y-m-d H:i:s', $payload->exp);
+            if ($token) {
+                // Call verify_token from jwt-core.php
+                $payload = verify_token($token);
+                if ($payload) {
+                    $debug_info['auth']['token_valid'] = true;
+                    $debug_info['auth']['user_id'] = $payload->sub;
+                    $debug_info['auth']['role'] = $payload->role;
+                    $debug_info['auth']['expiry'] = date('Y-m-d H:i:s', $payload->exp);
+                } else {
+                    $debug_info['auth']['token_valid'] = false;
+                    $debug_info['auth']['error'] = 'Token verification failed';
+                }
             } else {
-                $debug_info['auth']['token_valid'] = false;
-                $debug_info['auth']['error'] = 'Token verification failed';
+                $debug_info['auth']['error'] = 'Unable to extract token from authorization header';
             }
         } catch (Exception $e) {
             $debug_info['auth']['token_error'] = $e->getMessage();
