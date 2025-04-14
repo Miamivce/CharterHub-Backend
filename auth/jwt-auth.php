@@ -17,6 +17,8 @@ require_once __DIR__ . '/../utils/database.php';
  * 
  * @return array|bool User data if token is valid, false otherwise
  */
+// Check if the function is already defined to prevent redeclaration errors
+if (!function_exists('verify_jwt_token')) {
 function verify_jwt_token() {
     // Get JWT token from Authorization header
     $headers = getallheaders();
@@ -109,6 +111,7 @@ function verify_jwt_token() {
         error_log("JWT Authentication Failed: " . $e->getMessage());
         return false;
     }
+}
 }
 
 /**

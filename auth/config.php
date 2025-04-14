@@ -335,23 +335,59 @@ function validate_password($password) {
 // -------------------------------------------
 
 /**
- * Verify JWT token (compatibility function)
+ * Verify JWT token and extract payload
  * 
- * @deprecated Use functions from jwt-core.php instead
+ * @param string $jwt The JWT token to verify
+ * @param bool $allow_expired Whether to allow expired tokens (for refresh)
+ * @return object|bool The token payload if valid, false otherwise
  */
 if (!function_exists('verify_jwt_token')) {
     function verify_jwt_token($jwt, $allow_expired = false) {
-        require_once __DIR__ . '/jwt-core.php';
+        global $jwt_secret, $jwt_algorithm;
         
-        error_log("WARNING: Using deprecated verify_jwt_token() function from config.php.");
-        
-        $validation = validate_jwt_token($jwt, $allow_expired);
-        
-        if (!$validation['valid']) {
-            throw new Exception('Token validation failed: ' . $validation['error']);
+        try {
+            // Decode and verify token
+            $decoded = \Firebase\JWT\JWT::decode(
+                $jwt, 
+                new \Firebase\JWT\Key($jwt_secret, $jwt_algorithm)
+            );
+            
+            // Check if token is blacklisted
+            if (is_token_blacklisted($jwt)) {
+                error_log("Token verification failed: Token is blacklisted");
+                return false;
+            }
+            
+            return $decoded;
+        } catch (\Firebase\JWT\ExpiredException $e) {
+            if ($allow_expired) {
+                // For refresh tokens, we still need to validate the signature
+                try {
+                    // Tell JWT class to skip expiration check
+                    \Firebase\JWT\JWT::$timestamp = PHP_INT_MAX;
+                    
+                    // Verify signature only
+                    $decoded = \Firebase\JWT\JWT::decode(
+                        $jwt, 
+                        new \Firebase\JWT\Key($jwt_secret, $jwt_algorithm)
+                    );
+                    
+                    // Reset timestamp
+                    \Firebase\JWT\JWT::$timestamp = null;
+                    
+                    return $decoded;
+                } catch (Exception $e) {
+                    error_log("Expired token validation failed: " . $e->getMessage());
+                    return false;
+                }
+            }
+            
+            error_log("Token verification failed: Token has expired");
+            return false;
+        } catch (Exception $e) {
+            error_log("Token verification failed: " . $e->getMessage());
+            return false;
         }
-        
-        return (object)$validation['payload'];
     }
 }
 
