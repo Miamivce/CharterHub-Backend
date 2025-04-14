@@ -321,8 +321,8 @@ function json_response($data, $status_code = 200) {
  * @return string The URL to a default image
  */
 function get_default_image_for_destination($destination_name) {
-    // Use a static map of destination images rather than dynamic generation
-    // The goal is to prevent external API calls that could cause server issues
+    // Use a static map of destination images from yachtstory.com
+    // These are the actual images used by the live app
     $destination_map = [
         'BAHAMAS' => 'https://yachtstory.com/wp-content/uploads/2024/02/bahamas.jpg',
         'BALEARIC ISLANDS' => 'https://yachtstory.com/wp-content/uploads/2024/02/balearic.jpg',
@@ -346,9 +346,12 @@ function get_default_image_for_destination($destination_name) {
         'UK' => 'https://yachtstory.com/wp-content/uploads/2024/02/uk.jpg'
     ];
     
+    // Handle HTML entities in destination names (like &amp;)
+    $clean_name = html_entity_decode($destination_name);
+    
     // Default fallback image for any destination not in the map
     $default_image = 'https://yachtstory.com/wp-content/uploads/2024/02/yacht-destination.jpg';
     
     // Return the mapped image or default
-    return isset($destination_map[$destination_name]) ? $destination_map[$destination_name] : $default_image;
+    return isset($destination_map[$clean_name]) ? $destination_map[$clean_name] : $default_image;
 } 
