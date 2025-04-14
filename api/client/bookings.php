@@ -377,7 +377,7 @@ try {
     $user = verify_jwt_token();
     if (!$user) {
         error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
-        json_response([
+        bookings_json_response([
             'success' => false,
             'message' => 'Unauthorized access'
         ], 401);
@@ -395,7 +395,7 @@ try {
             handle_post_request($user);
             break;
         default:
-            json_response([
+            bookings_json_response([
                 'success' => false,
                 'message' => 'Method not allowed'
             ], 405);
@@ -403,7 +403,7 @@ try {
 } catch (Exception $e) {
     // Catch any unexpected errors and return proper JSON response
     error_log("BOOKINGS.PHP - Unexpected error: " . $e->getMessage());
-    json_response([
+    bookings_json_response([
         'success' => false,
         'message' => 'An unexpected error occurred',
         'error' => 'internal_server_error'
@@ -727,7 +727,7 @@ function handle_get_request($user) {
         
         // Return single booking or list based on request
         if (isset($_GET['id'])) {
-            json_response([
+            bookings_json_response([
                 'success' => true,
                 'message' => 'Booking retrieved successfully',
                 'data' => !empty($bookings) ? $bookings[0] : null,
@@ -740,7 +740,7 @@ function handle_get_request($user) {
             ]);
         } else {
             // Even if no bookings found, return success with empty array
-            json_response([
+            bookings_json_response([
                 'success' => true,
                 'message' => count($bookings) > 0 ? 'Bookings retrieved successfully' : 'No bookings found for this user',
                 'data' => $bookings,
@@ -758,7 +758,7 @@ function handle_get_request($user) {
         error_log("BOOKINGS.PHP - Stack trace: " . $e->getTraceAsString());
         
         // Return a more detailed error response for troubleshooting
-        json_response([
+        bookings_json_response([
             'success' => false,
             'message' => 'Error retrieving booking data',
             'error' => 'database_error',
@@ -906,7 +906,7 @@ function handle_post_request($user) {
         $conn->commit();
         
         // Return success response
-        json_response([
+        bookings_json_response([
             'success' => true,
             'message' => 'Booking created successfully',
             'data' => [
@@ -925,7 +925,7 @@ function handle_post_request($user) {
         }
         
         error_log("Error in client bookings POST request: " . $e->getMessage());
-        json_response([
+        bookings_json_response([
             'success' => false,
             'message' => 'Error creating booking',
             'error' => 'database_error',
@@ -935,12 +935,12 @@ function handle_post_request($user) {
 }
 
 /**
- * Send JSON response
+ * Send JSON response specifically for the bookings endpoint
  * 
  * @param array $data Response data
  * @param int $status HTTP status code
  */
-function json_response($data, $status = 200) {
+function bookings_json_response($data, $status = 200) {
     // Clear any existing output
     if (ob_get_level()) {
         ob_clean();
