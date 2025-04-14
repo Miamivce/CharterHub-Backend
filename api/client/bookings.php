@@ -182,7 +182,7 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'full_debug') {
 if (isset($_GET['debug']) && $_GET['debug'] === 'true') {
     // Activate detailed error reporting for debugging only
     set_exception_handler(function($exception) {
-        ob_clean();
+    ob_clean();
         
         // Get detailed exception information
         $trace = $exception->getTraceAsString();
@@ -221,11 +221,16 @@ try {
 
     // Check if this is a direct debug or test request - allow it without CORS checks
     if (isset($_GET['debug']) || (isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'Mozilla') !== false)) {
-        // For debug and browser requests, set permissive CORS headers
-        header('Access-Control-Allow-Origin: *');
+        // For debug and browser requests, set specific origin (instead of wildcard) if provided
+        if ($incoming_origin !== 'none') {
+            header("Access-Control-Allow-Origin: $incoming_origin");
+            header("Access-Control-Allow-Credentials: true");
+        } else {
+            header('Access-Control-Allow-Origin: *');
+        }
         header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
         header('Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control');
-        error_log("BOOKINGS.PHP - Debug/Test mode: Setting permissive CORS headers");
+        error_log("BOOKINGS.PHP - Debug/Test mode: Setting CORS headers for origin: {$incoming_origin}");
     } else {
         // Normal API operation with strict CORS
         $cors_result = apply_cors_headers(['GET', 'POST', 'OPTIONS']);
@@ -531,15 +536,15 @@ function handle_get_request($user) {
                         $columns = $describe_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
                         
                         error_log("BOOKINGS.PHP - Found columns in bookings table: " . implode(", ", $columns));
-                    
-                        // Check if main_charterer_id or customer_id is used
-                        if (in_array('main_charterer_id', $columns)) {
-                            $charterer_column = 'main_charterer_id';
+            
+            // Check if main_charterer_id or customer_id is used
+            if (in_array('main_charterer_id', $columns)) {
+                $charterer_column = 'main_charterer_id';
                             error_log("BOOKINGS.PHP - Using main_charterer_id column");
                         } else if (in_array('customer_id', $columns)) {
-                            $charterer_column = 'customer_id';
+                $charterer_column = 'customer_id';
                             error_log("BOOKINGS.PHP - Using customer_id column");
-                        } else {
+            } else {
                             error_log("BOOKINGS.PHP - No charterer column found, using default: {$charterer_column}");
                         }
                     }
@@ -738,13 +743,13 @@ function handle_get_request($user) {
                 
                 // Return response
                 bookings_json_response([
-                    'success' => true,
-                    'message' => 'Bookings retrieved successfully',
+                'success' => true,
+                'message' => 'Bookings retrieved successfully',
                     'data' => $bookings,
                     'total' => $total,
                     'limit' => $limit,
                     'offset' => $offset
-                ]);
+            ]);
             }
         } catch (Exception $query_e) {
             error_log("BOOKINGS.PHP - Error in query processing: " . $query_e->getMessage());
@@ -1034,9 +1039,16 @@ function debug_json_response($data) {
     // Start fresh buffer
     ob_start();
     
-    // Set appropriate headers
+    // Set appropriate headers - use specific origin if available
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '*';
     header('Content-Type: application/json');
-    header('Access-Control-Allow-Origin: *');
+    header("Access-Control-Allow-Origin: $origin");
+    
+    // If a specific origin was set, allow credentials
+    if ($origin !== '*') {
+        header('Access-Control-Allow-Credentials: true');
+    }
+    
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization');
     

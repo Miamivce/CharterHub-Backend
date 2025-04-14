@@ -68,10 +68,19 @@ function debug_json_response($data, $status_code = 200) {
     // Start fresh output buffer
     ob_start();
     
+    // Set appropriate headers - handle specific origin for credentials
+    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '*';
+    
     // Set headers
     http_response_code($status_code);
     header('Content-Type: application/json');
-    header('Access-Control-Allow-Origin: *');
+    header("Access-Control-Allow-Origin: $origin");
+    
+    // If using a specific origin, allow credentials
+    if ($origin !== '*') {
+        header('Access-Control-Allow-Credentials: true');
+    }
+    
     header('Access-Control-Allow-Methods: GET, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization');
     
