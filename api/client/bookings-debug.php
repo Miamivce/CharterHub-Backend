@@ -44,14 +44,26 @@ $debug_info = [
         'method' => $_SERVER['REQUEST_METHOD'] ?? 'unknown',
         'uri' => $_SERVER['REQUEST_URI'] ?? 'unknown',
         'user_id' => isset($_GET['user_id']) ? intval($_GET['user_id']) : 0,
+        'auth_header' => null,
+        'header_methods' => [
+            'getallheaders' => function_exists('getallheaders'),
+            'apache_request_headers' => function_exists('apache_request_headers')
+        ]
     ]
+];
+
+// Add server information to debug output
+$debug_info['server_info'] = [
+    'software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+    'php_sapi' => PHP_SAPI,
+    'server_protocol' => $_SERVER['SERVER_PROTOCOL'] ?? 'unknown'
 ];
 
 // If there was unexpected output, add it to the debug info
 if (!empty($unexpected_output)) {
     $debug_info['warnings'] = [
         'unexpected_output' => substr($unexpected_output, 0, 500), // Limit to 500 chars
-        'message' => 'Unexpected output detected from included files'
+        'output_source' => 'Likely from an included file'
     ];
 }
 
@@ -100,9 +112,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     ], 200);
 }
 
-// Get authorization header
-$headers = getallheaders();
-$auth_header = isset($headers['Authorization']) ? $headers['Authorization'] : '';
+// Get authorization header using multiple methods for maximum compatibility
+$auth_header = null;
+
+// Method 1: Try getallheaders() function
+if (function_exists('getallheaders')) {
+    $headers = getallheaders();
+    foreach (['Authorization', 'authorization'] as $header_name) {
+        if (isset($headers[$header_name])) {
+            $auth_header = $headers[$header_name];
+            break;
+        }
+    }
+}
+
+// Method 2: Try apache_request_headers() if available
+if (empty($auth_header) && function_exists('apache_request_headers')) {
+    $headers = apache_request_headers();
+    foreach (['Authorization', 'authorization'] as $header_name) {
+        if (isset($headers[$header_name])) {
+            $auth_header = $headers[$header_name];
+            break;
+        }
+    }
+}
+
+// Method 3: Try $_SERVER variables
+if (empty($auth_header)) {
+    $server_vars = [
+        'HTTP_AUTHORIZATION',
+        'REDIRECT_HTTP_AUTHORIZATION',
+        'HTTP_X_AUTHORIZATION',
+        'HTTP_BEARER',
+        'AUTHORIZATION'
+    ];
+    
+    foreach ($server_vars as $var) {
+        if (isset($_SERVER[$var])) {
+            $auth_header = $_SERVER[$var];
+            break;
+        }
+    }
+}
+
+// Method 4: Check query string (less secure but useful for debugging)
+if (empty($auth_header) && isset($_GET['token'])) {
+    $auth_header = 'Bearer ' . $_GET['token'];
+}
+
 $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
 
 // Update request info

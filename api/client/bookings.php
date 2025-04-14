@@ -379,18 +379,69 @@ error_log("Client bookings.php endpoint called with method: " . $_SERVER['REQUES
 // Verify JWT token for all requests
 error_log("BOOKINGS.PHP - Starting token verification");
 try {
-    // Explicitly get the authorization header
+    // Explicitly get the authorization header - using multiple methods for maximum compatibility
     $auth_header = null;
-    $headers = getallheaders();
+    $token = null;
     
-    // Try different header naming conventions
-    foreach (['Authorization', 'authorization', 'HTTP_AUTHORIZATION'] as $header_name) {
-        if (isset($headers[$header_name])) {
-            $auth_header = $headers[$header_name];
-            error_log("BOOKINGS.PHP - Authorization header found in: {$header_name}");
-            break;
+    // Method 1: Try getallheaders() function if available
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        error_log("BOOKINGS.PHP - Headers from getallheaders(): " . json_encode(array_keys($headers)));
+        
+        // Try different header naming conventions
+        foreach (['Authorization', 'authorization', 'HTTP_AUTHORIZATION'] as $header_name) {
+            if (isset($headers[$header_name])) {
+                $auth_header = $headers[$header_name];
+                error_log("BOOKINGS.PHP - Authorization header found in getallheaders() with key: {$header_name}");
+                break;
+            }
+        }
+    } else {
+        error_log("BOOKINGS.PHP - getallheaders() function not available");
+    }
+    
+    // Method 2: Try apache_request_headers() function if available
+    if (empty($auth_header) && function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        error_log("BOOKINGS.PHP - Headers from apache_request_headers(): " . json_encode(array_keys($headers)));
+        
+        foreach (['Authorization', 'authorization'] as $header_name) {
+            if (isset($headers[$header_name])) {
+                $auth_header = $headers[$header_name];
+                error_log("BOOKINGS.PHP - Authorization header found in apache_request_headers() with key: {$header_name}");
+                break;
+            }
         }
     }
+    
+    // Method 3: Try $_SERVER variables (used in many PHP configurations)
+    if (empty($auth_header)) {
+        $server_vars = [
+            'HTTP_AUTHORIZATION', 
+            'REDIRECT_HTTP_AUTHORIZATION',
+            'REDIRECT_REDIRECT_HTTP_AUTHORIZATION',
+            'HTTP_X_AUTHORIZATION',
+            'HTTP_BEARER',
+            'AUTHORIZATION'
+        ];
+        
+        foreach ($server_vars as $var) {
+            if (isset($_SERVER[$var]) && !empty($_SERVER[$var])) {
+                $auth_header = $_SERVER[$var];
+                error_log("BOOKINGS.PHP - Authorization header found in \$_SERVER['{$var}']");
+                break;
+            }
+        }
+    }
+    
+    // Method 4: Check for token in URL if allowed (less secure, but useful for debugging)
+    if (empty($auth_header) && isset($_GET['token'])) {
+        $auth_header = 'Bearer ' . $_GET['token'];
+        error_log("BOOKINGS.PHP - Using token from URL parameter (less secure)");
+    }
+    
+    // Debug log the raw $_SERVER array to see what's available
+    error_log("BOOKINGS.PHP - \$_SERVER keys: " . json_encode(array_keys($_SERVER)));
     
     if (!empty($auth_header)) {
         error_log("BOOKINGS.PHP - Authorization header found: " . substr($auth_header, 0, 20) . "...");
@@ -400,7 +451,13 @@ try {
         if (preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
             $token = $matches[1];
             error_log("BOOKINGS.PHP - Token extracted, length: " . strlen($token));
-            
+        } else {
+            // If header doesn't include "Bearer", try using it directly (less strict)
+            $token = trim($auth_header);
+            error_log("BOOKINGS.PHP - No Bearer prefix, using raw header as token, length: " . strlen($token));
+        }
+        
+        if ($token) {
             // Call verify_jwt_token WITH the token
             $user = verify_jwt_token($token);
             
@@ -408,25 +465,40 @@ try {
                 error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
                 bookings_json_response([
                     'success' => false,
-                    'message' => 'Unauthorized access'
+                    'message' => 'Unauthorized access - Token invalid'
                 ], 401);
                 exit;
             } else {
                 error_log("BOOKINGS.PHP - JWT verification successful, user ID: " . $user['id']);
             }
         } else {
-            error_log("BOOKINGS.PHP - No Bearer token found in Authorization header");
+            error_log("BOOKINGS.PHP - Failed to extract token from Authorization header");
             bookings_json_response([
                 'success' => false,
-                'message' => 'Invalid authorization format'
+                'message' => 'Invalid authorization format - Token extraction failed'
             ], 401);
             exit;
         }
     } else {
-        error_log("BOOKINGS.PHP - No Authorization header found");
+        error_log("BOOKINGS.PHP - No Authorization header found after trying multiple methods");
+        
+        // List available environment info for debugging
+        error_log("BOOKINGS.PHP - SERVER_SOFTWARE: " . ($_SERVER['SERVER_SOFTWARE'] ?? 'unknown'));
+        error_log("BOOKINGS.PHP - REQUEST_METHOD: " . ($_SERVER['REQUEST_METHOD'] ?? 'unknown'));
+        error_log("BOOKINGS.PHP - CONTENT_TYPE: " . ($_SERVER['CONTENT_TYPE'] ?? 'unknown'));
+        error_log("BOOKINGS.PHP - HTTP_HOST: " . ($_SERVER['HTTP_HOST'] ?? 'unknown'));
+        
         bookings_json_response([
             'success' => false,
-            'message' => 'No authorization provided'
+            'message' => 'No authorization provided',
+            'debug_info' => [
+                'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+                'REQUEST_METHOD' => $_SERVER['REQUEST_METHOD'] ?? 'unknown',
+                'available_methods' => [
+                    'getallheaders' => function_exists('getallheaders'),
+                    'apache_request_headers' => function_exists('apache_request_headers')
+                ]
+            ]
         ], 401);
         exit;
     }
