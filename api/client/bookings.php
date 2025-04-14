@@ -135,6 +135,32 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
             $query_check['error'] = $qe->getMessage();
         }
         
+        // Add bookings diagnosis for current user if provided
+        $user_bookings_check = null;
+        if (isset($_GET['user_id']) && is_numeric($_GET['user_id'])) {
+            $test_user_id = (int)$_GET['user_id'];
+            try {
+                $user_query = "SELECT * FROM `{$bookings_table}` WHERE {$charterer_column} = ? LIMIT 5";
+                $user_stmt = $conn->prepare($user_query);
+                
+                if ($user_stmt) {
+                    $user_stmt->execute([$test_user_id]);
+                    $rows = $user_stmt->fetchAll(PDO::FETCH_ASSOC);
+                    
+                    $user_bookings_check = [
+                        'user_id' => $test_user_id,
+                        'found_bookings' => count($rows),
+                        'sample_rows' => $rows
+                    ];
+                }
+            } catch (Exception $ue) {
+                $user_bookings_check = [
+                    'user_id' => $test_user_id,
+                    'error' => $ue->getMessage()
+                ];
+            }
+        }
+        
         // Database connection information
         $db_info = [
             'driver' => $conn->getAttribute(PDO::ATTR_DRIVER_NAME),
@@ -166,6 +192,7 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'connection_test') {
             'booking_columns' => $booking_columns,
             'charterer_column' => $charterer_column,
             'query_test' => $query_check,
+            'user_bookings_check' => $user_bookings_check,
             'database_info' => $db_info,
             'server_environment' => $server_env
         ]);
@@ -614,9 +641,9 @@ function handle_get_request($user) {
                         foreach ($guest_rows as $guest_row) {
                             $guests[] = [
                                 'id' => (int)$guest_row['user_id'],
-                                'firstName' => $guest_row['first_name'],
-                                'lastName' => $guest_row['last_name'],
-                                'email' => $guest_row['email']
+                                'firstName' => $guest_row['first_name'] ?? '',
+                                'lastName' => $guest_row['last_name'] ?? '',
+                                'email' => $guest_row['email'] ?? ''
                             ];
                         }
                     }
@@ -627,22 +654,49 @@ function handle_get_request($user) {
             }
             
             // Format the booking with all related data
+            // Make sure the charterer column exists in the result set, fall back to safer values if missing
+            $charterer_id = 0;
+            try {
+                // Check if the column exists in result set
+                if (isset($row[$charterer_column])) {
+                    $charterer_id = (int)$row[$charterer_column];
+                    error_log("BOOKINGS.PHP - Found charterer ID in column {$charterer_column}: {$charterer_id}");
+                } else {
+                    error_log("BOOKINGS.PHP - Charterer column '{$charterer_column}' not found in result. Available columns: " . implode(", ", array_keys($row)));
+                    // Try alternate column names
+                    if (isset($row['main_charterer_id'])) {
+                        $charterer_id = (int)$row['main_charterer_id'];
+                        error_log("BOOKINGS.PHP - Using main_charterer_id as fallback: {$charterer_id}");
+                    } elseif (isset($row['customer_id'])) {
+                        $charterer_id = (int)$row['customer_id'];
+                        error_log("BOOKINGS.PHP - Using customer_id as fallback: {$charterer_id}");
+                    } else {
+                        // Last resort, try user_id from GET parameter
+                        $charterer_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
+                        error_log("BOOKINGS.PHP - Using user_id from GET as last resort: {$charterer_id}");
+                    }
+                }
+            } catch (Exception $ce) {
+                error_log("BOOKINGS.PHP - Error accessing charterer ID: " . $ce->getMessage());
+                $charterer_id = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
+            }
+            
             $bookings[] = [
                 'id' => (int)$row['id'],
-                'startDate' => $row['start_date'],
-                'endDate' => $row['end_date'],
-                'status' => $row['status'],
-                'totalPrice' => (float)$row['total_price'],
-                'createdAt' => $row['created_at'],
+                'startDate' => $row['start_date'] ?? '',
+                'endDate' => $row['end_date'] ?? '',
+                'status' => $row['status'] ?? 'pending',
+                'totalPrice' => isset($row['total_price']) ? (float)$row['total_price'] : 0.00,
+                'createdAt' => $row['created_at'] ?? date('Y-m-d H:i:s'),
                 'yacht' => [
-                    'id' => (int)$row['yacht_id'],
-                    'name' => $row['yacht_name']
+                    'id' => isset($row['yacht_id']) ? (int)$row['yacht_id'] : 0,
+                    'name' => $row['yacht_name'] ?? 'Unknown Yacht'
                 ],
                 'mainCharterer' => [
-                    'id' => (int)$row[$charterer_column],
-                    'firstName' => $row['main_charterer_first_name'],
-                    'lastName' => $row['main_charterer_last_name'],
-                    'email' => $row['main_charterer_email']
+                    'id' => $charterer_id,
+                    'firstName' => $row['main_charterer_first_name'] ?? '',
+                    'lastName' => $row['main_charterer_last_name'] ?? '',
+                    'email' => $row['main_charterer_email'] ?? ''
                 ],
                 'guestList' => $guests
             ];
