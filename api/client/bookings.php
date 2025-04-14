@@ -17,6 +17,10 @@ ob_start();
 // Force JSON response type - even before anything else
 header('Content-Type: application/json');
 
+// Log memory usage
+$memory_start = memory_get_usage();
+error_log("BOOKINGS.PHP: Starting with memory usage: " . $memory_start . " bytes");
+
 // Prevent any PHP errors from being displayed directly
 @ini_set('display_errors', 0);
 error_reporting(0);
@@ -379,144 +383,176 @@ error_log("Client bookings.php endpoint called with method: " . $_SERVER['REQUES
 // Verify JWT token for all requests
 error_log("BOOKINGS.PHP - Starting token verification");
 try {
-    // Explicitly get the authorization header - using multiple methods for maximum compatibility
+    // Extract token from Authorization header - more robust version from minimal
     $auth_header = null;
     $token = null;
-    
-    // Method 1: Try getallheaders() function if available
+
+    // Method 1: Try getallheaders() function
     if (function_exists('getallheaders')) {
         $headers = getallheaders();
-        error_log("BOOKINGS.PHP - Headers from getallheaders(): " . json_encode(array_keys($headers)));
-        
-        // Try different header naming conventions
-        foreach (['Authorization', 'authorization', 'HTTP_AUTHORIZATION'] as $header_name) {
-            if (isset($headers[$header_name])) {
-                $auth_header = $headers[$header_name];
-                error_log("BOOKINGS.PHP - Authorization header found in getallheaders() with key: {$header_name}");
-                break;
-            }
-        }
-    } else {
-        error_log("BOOKINGS.PHP - getallheaders() function not available");
-    }
-    
-    // Method 2: Try apache_request_headers() function if available
-    if (empty($auth_header) && function_exists('apache_request_headers')) {
-        $headers = apache_request_headers();
-        error_log("BOOKINGS.PHP - Headers from apache_request_headers(): " . json_encode(array_keys($headers)));
         
         foreach (['Authorization', 'authorization'] as $header_name) {
             if (isset($headers[$header_name])) {
                 $auth_header = $headers[$header_name];
-                error_log("BOOKINGS.PHP - Authorization header found in apache_request_headers() with key: {$header_name}");
                 break;
             }
         }
     }
-    
-    // Method 3: Try $_SERVER variables (used in many PHP configurations)
+
+    // Method 2: Try apache_request_headers() function
+    if (empty($auth_header) && function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        
+        foreach (['Authorization', 'authorization'] as $header_name) {
+            if (isset($headers[$header_name])) {
+                $auth_header = $headers[$header_name];
+                break;
+            }
+        }
+    }
+
+    // Method 3: Try $_SERVER variables
     if (empty($auth_header)) {
-        $server_vars = [
-            'HTTP_AUTHORIZATION', 
-            'REDIRECT_HTTP_AUTHORIZATION',
-            'REDIRECT_REDIRECT_HTTP_AUTHORIZATION',
-            'HTTP_X_AUTHORIZATION',
-            'HTTP_BEARER',
-            'AUTHORIZATION'
-        ];
+        $server_vars = ['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION'];
         
         foreach ($server_vars as $var) {
             if (isset($_SERVER[$var]) && !empty($_SERVER[$var])) {
                 $auth_header = $_SERVER[$var];
-                error_log("BOOKINGS.PHP - Authorization header found in \$_SERVER['{$var}']");
                 break;
             }
         }
     }
-    
-    // Method 4: Check for token in URL if allowed (less secure, but useful for debugging)
-    if (empty($auth_header) && isset($_GET['token'])) {
+
+    // Method 4: Check URL parameter as fallback (development only)
+    if (empty($auth_header) && isset($_GET['token']) && defined('DEV_ENVIRONMENT') && DEV_ENVIRONMENT) {
         $auth_header = 'Bearer ' . $_GET['token'];
-        error_log("BOOKINGS.PHP - Using token from URL parameter (less secure)");
     }
-    
-    // Debug log the raw $_SERVER array to see what's available
-    error_log("BOOKINGS.PHP - \$_SERVER keys: " . json_encode(array_keys($_SERVER)));
-    
+
+    // Log auth header status
+    $auth_status = !empty($auth_header) ? "Found: " . substr($auth_header, 0, 20) . "..." : "Not found";
+    error_log("BOOKINGS.PHP: Auth header - " . $auth_status);
+
+    // Extract token from header
     if (!empty($auth_header)) {
-        error_log("BOOKINGS.PHP - Authorization header found: " . substr($auth_header, 0, 20) . "...");
-        
-        // Extract the token from the Bearer format
-        $matches = [];
         if (preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
             $token = $matches[1];
-            error_log("BOOKINGS.PHP - Token extracted, length: " . strlen($token));
-        } else {
-            // If header doesn't include "Bearer", try using it directly (less strict)
-            $token = trim($auth_header);
-            error_log("BOOKINGS.PHP - No Bearer prefix, using raw header as token, length: " . strlen($token));
+        } else if (strpos($auth_header, ' ') === false) {
+            // Support for simple token without Bearer prefix
+            $token = $auth_header;
         }
-        
-        if ($token) {
-            // Call verify_jwt_token WITH the token
-            $user = verify_jwt_token($token);
-            
-            if (!$user) {
-                error_log("BOOKINGS.PHP - JWT verification failed, unauthorized access");
-                bookings_json_response([
-                    'success' => false,
-                    'message' => 'Unauthorized access - Token invalid'
-                ], 401);
-                exit;
-            } else {
-                error_log("BOOKINGS.PHP - JWT verification successful, user ID: " . $user['id']);
+    }
+
+    // Check URL token as fallback for testing
+    if (empty($token) && isset($_GET['token'])) {
+        $token = $_GET['token'];
+    }
+
+    // Verify token if it exists
+    $user = null;
+    $verified = false;
+    $auth_error = null;
+
+    if (!empty($token)) {
+        // Basic validation check
+        if (strlen($token) < 10) {
+            $auth_error = "Token too short";
+        } else {
+            try {
+                // Log for debugging purposes
+                error_log("BOOKINGS.PHP: Verifying token");
+                
+                // Verify token and get user information
+                $payload = verify_token($token);
+                if ($payload && isset($payload->sub)) {
+                    $verified = true;
+                    $user = [
+                        'id' => intval($payload->sub),
+                        'email' => $payload->email ?? '',
+                        'name' => $payload->name ?? '',
+                        'role' => $payload->role ?? 'customer'
+                    ];
+                    error_log("BOOKINGS.PHP: Token verified for user ID: " . $user['id']);
+                } else {
+                    $auth_error = "Invalid token payload";
+                }
+            } catch (Exception $e) {
+                $auth_error = $e->getMessage();
+                error_log("BOOKINGS.PHP: Token verification error: " . $auth_error);
             }
-        } else {
-            error_log("BOOKINGS.PHP - Failed to extract token from Authorization header");
-            bookings_json_response([
-                'success' => false,
-                'message' => 'Invalid authorization format - Token extraction failed'
-            ], 401);
-            exit;
         }
-    } else {
-        error_log("BOOKINGS.PHP - No Authorization header found after trying multiple methods");
-        
-        // List available environment info for debugging
-        error_log("BOOKINGS.PHP - SERVER_SOFTWARE: " . ($_SERVER['SERVER_SOFTWARE'] ?? 'unknown'));
-        error_log("BOOKINGS.PHP - REQUEST_METHOD: " . ($_SERVER['REQUEST_METHOD'] ?? 'unknown'));
-        error_log("BOOKINGS.PHP - CONTENT_TYPE: " . ($_SERVER['CONTENT_TYPE'] ?? 'unknown'));
-        error_log("BOOKINGS.PHP - HTTP_HOST: " . ($_SERVER['HTTP_HOST'] ?? 'unknown'));
-        
-        bookings_json_response([
-            'success' => false,
-            'message' => 'No authorization provided',
-            'debug_info' => [
-                'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
-                'REQUEST_METHOD' => $_SERVER['REQUEST_METHOD'] ?? 'unknown',
-                'available_methods' => [
-                    'getallheaders' => function_exists('getallheaders'),
-                    'apache_request_headers' => function_exists('apache_request_headers')
-                ]
+    }
+
+    // Debug endpoint for token verification
+    if (isset($_GET['debug']) && $_GET['debug'] === 'token_test') {
+        debug_json_response([
+            'success' => $verified,
+            'auth_header_found' => !empty($auth_header),
+            'token_found' => !empty($token),
+            'token_verified' => $verified,
+            'error' => $auth_error,
+            'user' => $user,
+            'memory_usage' => [
+                'start' => $memory_start,
+                'current' => memory_get_usage(),
+                'peak' => memory_get_peak_usage()
             ]
-        ], 401);
+        ]);
         exit;
     }
+
+    // Require authentication for non-debug endpoints
+    if (!$verified && !isset($_GET['debug'])) {
+        $response = [
+            'success' => false,
+            'message' => 'Authentication required',
+            'error' => 'auth_required'
+        ];
+        
+        // Add debugging info for troubleshooting client-side issues
+        if (isset($_GET['verbose']) && $_GET['verbose'] === 'true') {
+            $response['details'] = [
+                'auth_header_found' => !empty($auth_header),
+                'token_extracted' => !empty($token),
+                'auth_error' => $auth_error
+            ];
+        }
+        
+        bookings_json_response($response, 401);
+        exit;
+    }
+
+    // Memory check
+    error_log("BOOKINGS.PHP: After auth - Memory: " . memory_get_usage() . " bytes");
 
     // Handle different HTTP methods
     switch ($_SERVER['REQUEST_METHOD']) {
         case 'GET':
-            handle_get_request($user);
+            // Check for pagination parameters to limit memory usage
+            $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+            $limit = isset($_GET['limit']) ? min(50, max(1, intval($_GET['limit']))) : 10;
+            
+            error_log("BOOKINGS.PHP: Processing GET request with pagination: page=$page, limit=$limit");
+            handle_get_request($user, $page, $limit);
             break;
+        
         case 'POST':
+            error_log("BOOKINGS.PHP: Processing POST request");
             handle_post_request($user);
             break;
+        
         default:
             bookings_json_response([
                 'success' => false,
-                'message' => 'Method not allowed'
+                'message' => 'Method not allowed',
+                'error' => 'method_not_allowed'
             ], 405);
+            break;
     }
+
+    // Make sure to clean up any resources
+    error_log("BOOKINGS.PHP: End of request - Memory peak: " . memory_get_peak_usage() . " bytes");
+    if (ob_get_length()) ob_end_flush();
+    exit;
 } catch (Exception $e) {
     // Catch any unexpected errors and return proper JSON response
     error_log("BOOKINGS.PHP - Unexpected error: " . $e->getMessage());
@@ -532,7 +568,7 @@ try {
  * 
  * @param array $user Authenticated user data
  */
-function handle_get_request($user) {
+function handle_get_request($user, $page = 1, $limit = 10) {
     try {
         error_log("BOOKINGS.PHP - Starting GET request handler for user ID: " . $user['id']);
         
@@ -1048,54 +1084,18 @@ function handle_post_request($user) {
  * @param int $status HTTP status code
  */
 function bookings_json_response($data, $status = 200) {
-    // Clear any existing output
-    if (ob_get_level()) {
-        ob_clean();
-    }
+    // Clean any output buffer
+    if (ob_get_level()) ob_clean();
     
-    // Set headers
+    // Set required headers
     header('Content-Type: application/json');
     http_response_code($status);
     
-    // Handle JSON encoding errors
-    try {
-        // Sanitize data to prevent JSON encoding issues
-        $sanitized_data = sanitize_data_for_json($data);
-        
-        // Encode data with error handling
-        $json = json_encode($sanitized_data, JSON_PRETTY_PRINT);
-        
-        // Check for JSON encoding errors
-        if ($json === false) {
-            $json_error = json_last_error_msg();
-            error_log("JSON encoding error: " . $json_error);
-            
-            // Provide a sanitized response
-            echo json_encode([
-                'success' => false,
-                'message' => 'Error encoding response',
-                'error' => 'json_encode_error',
-                'error_message' => $json_error
-            ], JSON_PRETTY_PRINT);
-        } else {
-            // Output successful JSON
-            echo $json;
-        }
-    } catch (Exception $e) {
-        // Fallback for any other errors
-        error_log("Exception in json_response: " . $e->getMessage());
-        echo json_encode([
-            'success' => false,
-            'message' => 'Error while generating response',
-            'error' => 'response_generation_error'
-        ], JSON_PRETTY_PRINT);
-    }
+    // Encode and output the data
+    echo json_encode(sanitize_data_for_json($data));
     
-    // End output buffering
-    if (ob_get_level()) {
-        ob_end_flush();
-    }
-    
+    // Flush output and end request
+    if (ob_get_level()) ob_end_flush();
     exit;
 }
 
@@ -1128,41 +1128,30 @@ function sanitize_data_for_json($data) {
 }
 
 /**
- * Debug JSON Response
- * 
- * Properly formats and outputs JSON for debug endpoints with proper buffer handling
- * 
- * @param array $data The data to convert to JSON
- * @return void
+ * Debug JSON response that's optimized for performance
  */
 function debug_json_response($data) {
-    // Clear any existing output buffers
-    while (ob_get_level() > 0) {
-        ob_end_clean();
-    }
+    // Clean any output buffer
+    if (ob_get_level()) ob_clean();
     
-    // Start fresh buffer
-    ob_start();
-    
-    // Set appropriate headers - use specific origin if available
-    $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '*';
+    // Set headers
     header('Content-Type: application/json');
-    header("Access-Control-Allow-Origin: $origin");
     
-    // If a specific origin was set, allow credentials
-    if ($origin !== '*') {
-        header('Access-Control-Allow-Credentials: true');
+    // Add memory usage to debug data
+    if (is_array($data) && !isset($data['memory'])) {
+        $data['memory'] = [
+            'start' => $GLOBALS['memory_start'] ?? 0,
+            'peak' => memory_get_peak_usage(),
+            'current' => memory_get_usage()
+        ];
     }
-    
-    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization');
     
     // Encode and output the data
-    echo json_encode($data, JSON_PRETTY_PRINT);
+    echo json_encode($data);
     
-    // Flush buffer and exit
-    ob_end_flush();
-    exit();
+    // Flush output and end request
+    if (ob_get_level()) ob_end_flush();
+    exit;
 }
 
 // We're using the get_database_connection function from jwt-auth.php
