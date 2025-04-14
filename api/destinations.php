@@ -94,21 +94,23 @@ function handle_get_request() {
                 $image = $image_result->fetch_assoc();
                 $destination['featured_image'] = $image['guid'];
             } else {
-                // Check if we have a direct image URL stored
-                $destination['featured_image'] = !empty($destination['direct_featured_image']) ? 
-                    $destination['direct_featured_image'] : 
-                    get_default_image_for_destination($destination['name']);
+                $destination['featured_image'] = '';
             }
             
             $image_stmt->close();
             unset($destination['featured_image_id']);
+        } else if (!empty($destination['direct_featured_image'])) {
+            // Use direct image URL if available
+            $destination['featured_image'] = $destination['direct_featured_image'];
         } else {
-            // Try to use direct featured image URL if available
-            $destination['featured_image'] = !empty($destination['direct_featured_image']) ? 
-                $destination['direct_featured_image'] : 
-                get_default_image_for_destination($destination['name']);
+            $destination['featured_image'] = '';
         }
         unset($destination['direct_featured_image']); // Remove this field from the response
+        
+        // If featured image is empty, use default image based on destination name
+        if (empty($destination['featured_image'])) {
+            $destination['featured_image'] = get_default_image_for_destination($destination['name']);
+        }
         
         // Convert highlights to array if it's serialized
         if (!empty($destination['highlights'])) {
@@ -189,20 +191,22 @@ function handle_get_request() {
                     $image = $image_result->fetch_assoc();
                     $row['featured_image'] = $image['guid'];
                 } else {
-                    // Check if we have a direct image URL stored
-                    $row['featured_image'] = !empty($row['direct_featured_image']) ? 
-                        $row['direct_featured_image'] : 
-                        get_default_image_for_destination($row['name']);
+                    $row['featured_image'] = '';
                 }
                 
                 unset($row['featured_image_id']);
+            } else if (!empty($row['direct_featured_image'])) {
+                // Use direct image URL if available
+                $row['featured_image'] = $row['direct_featured_image'];
             } else {
-                // Try to use direct featured image URL if available
-                $row['featured_image'] = !empty($row['direct_featured_image']) ? 
-                    $row['direct_featured_image'] : 
-                    get_default_image_for_destination($row['name']);
+                $row['featured_image'] = '';
             }
             unset($row['direct_featured_image']); // Remove this field from the response
+            
+            // If featured image is empty, use default image based on destination name
+            if (empty($row['featured_image'])) {
+                $row['featured_image'] = get_default_image_for_destination($row['name']);
+            }
             
             // Convert highlights to array if it's serialized
             if (!empty($row['highlights'])) {
