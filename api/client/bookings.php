@@ -335,17 +335,22 @@ function get_bookings_db_connection() {
                     error_log("BOOKINGS.PHP - Disabled SSL certificate verification");
                 }
                 
-                error_log("BOOKINGS.PHP - Attempting emergency fallback connection");
-                $pdo = new PDO($dsn, $username, $password, $options);
-                
-                // Test the connection with a simple query
-                $test = $pdo->query("SELECT 1");
-                if (!$test) {
-                    throw new Exception("Connection test query failed");
+                try {
+                    error_log("BOOKINGS.PHP - Attempting emergency fallback connection");
+                    $pdo = new PDO($dsn, $username, $password, $options);
+                    
+                    // Test the connection with a simple query
+                    $test = $pdo->query("SELECT 1");
+                    if (!$test) {
+                        throw new Exception("Connection test query failed");
+                    }
+                    
+                    error_log("BOOKINGS.PHP - Fallback connection successful");
+                    return $pdo;
+                } catch (PDOException $pdo_e) {
+                    error_log("BOOKINGS.PHP - PDO exception during fallback connection: " . $pdo_e->getMessage());
+                    throw new Exception("PDO exception: " . $pdo_e->getMessage());
                 }
-                
-                error_log("BOOKINGS.PHP - Fallback connection successful");
-                return $pdo;
             } catch (Exception $fallback_e) {
                 error_log("BOOKINGS.PHP - All database connection attempts failed: " . $fallback_e->getMessage());
                 throw new Exception("Failed to establish any database connection: " . $fallback_e->getMessage());
@@ -952,8 +957,11 @@ function bookings_json_response($data, $status = 200) {
     
     // Handle JSON encoding errors
     try {
+        // Sanitize data to prevent JSON encoding issues
+        $sanitized_data = sanitize_data_for_json($data);
+        
         // Encode data with error handling
-        $json = json_encode($data, JSON_PRETTY_PRINT);
+        $json = json_encode($sanitized_data, JSON_PRETTY_PRINT);
         
         // Check for JSON encoding errors
         if ($json === false) {
@@ -987,6 +995,34 @@ function bookings_json_response($data, $status = 200) {
     }
     
     exit;
+}
+
+/**
+ * Recursively sanitize data to ensure it's JSON-encodable
+ * 
+ * @param mixed $data The data to sanitize
+ * @return mixed The sanitized data
+ */
+function sanitize_data_for_json($data) {
+    if (is_array($data)) {
+        $result = [];
+        foreach ($data as $key => $value) {
+            $result[$key] = sanitize_data_for_json($value);
+        }
+        return $result;
+    } elseif (is_object($data)) {
+        // Convert objects to arrays for safer JSON encoding
+        return sanitize_data_for_json((array)$data);
+    } elseif (is_string($data)) {
+        // Make sure strings are valid UTF-8
+        return mb_convert_encoding($data, 'UTF-8', 'UTF-8');
+    } elseif (is_resource($data)) {
+        // Convert resources to their ID
+        return 'resource#' . get_resource_type($data);
+    } else {
+        // Return scalars and nulls unchanged
+        return $data;
+    }
 }
 
 // We're using the get_database_connection function from jwt-auth.php
