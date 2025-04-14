@@ -317,66 +317,34 @@ function json_response($data, $status_code = 200) {
  * @return string The URL to a default image
  */
 function get_default_image_for_destination($destination_name) {
-    // Normalize destination name for use in URL
-    $normalized_name = strtolower(str_replace(['&amp;', ' & ', ' '], ['and', '-', '-'], $destination_name));
-    
-    // Define possible image paths
-    $possible_paths = [
-        // Original WordPress media URLs
-        "https://www.yachtstory.com/wp-content/uploads/destinations/{$normalized_name}.jpg",
-        "https://www.yachtstory.com/wp-content/uploads/destinations/{$normalized_name}.png",
-        
-        // Local storage
-        "/images/destinations/{$normalized_name}.jpg",
-        
-        // Specific destinations with custom images
-        // These can be expanded for each destination
+    // Use a static map of destination images rather than dynamic generation
+    // The goal is to prevent external API calls that could cause server issues
+    $destination_map = [
+        'BAHAMAS' => 'https://yachtstory.com/wp-content/uploads/2024/02/bahamas.jpg',
+        'BALEARIC ISLANDS' => 'https://yachtstory.com/wp-content/uploads/2024/02/balearic.jpg',
+        'CARIBBEAN' => 'https://yachtstory.com/wp-content/uploads/2024/02/caribbean.jpg',
+        'CORSICA & SARDINIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/corsica.jpg',
+        'CROATIA & MONTENEGRO' => 'https://yachtstory.com/wp-content/uploads/2024/02/croatia.jpg',
+        'FRENCH POLYNESIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/polynesia.jpg',
+        'FRENCH RIVIERA' => 'https://yachtstory.com/wp-content/uploads/2024/02/french-riviera.jpg',
+        'GALAPAGOS' => 'https://yachtstory.com/wp-content/uploads/2024/02/galapagos.jpg',
+        'GREEK ISLANDS' => 'https://yachtstory.com/wp-content/uploads/2024/02/greek.jpg',
+        'INDONESIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/indonesia.jpg',
+        'ITALIAN RIVIERA' => 'https://yachtstory.com/wp-content/uploads/2024/02/italian-riviera.jpg',
+        'MALAYSIA' => 'https://yachtstory.com/wp-content/uploads/2024/02/malaysia.jpg',
+        'MALDIVES' => 'https://yachtstory.com/wp-content/uploads/2024/02/maldives.jpg',
+        'RED SEA' => 'https://yachtstory.com/wp-content/uploads/2024/02/red-sea.jpg',
+        'SEYCHELLES' => 'https://yachtstory.com/wp-content/uploads/2024/02/seychelles.jpg',
+        'SICILY & AEOLIAN ISLANDS' => 'https://yachtstory.com/wp-content/uploads/2024/02/sicily.jpg',
+        'SOUTH PACIFIC' => 'https://yachtstory.com/wp-content/uploads/2024/02/south-pacific.jpg',
+        'THAILAND' => 'https://yachtstory.com/wp-content/uploads/2024/02/thailand.jpg',
+        'TURKISH RIVIERA' => 'https://yachtstory.com/wp-content/uploads/2024/02/turkish-riviera.jpg',
+        'UK' => 'https://yachtstory.com/wp-content/uploads/2024/02/uk.jpg'
     ];
     
-    // Destination-specific overrides
-    switch ($normalized_name) {
-        case 'bahamas':
-            return "https://source.unsplash.com/featured/800x450?bahamas&yacht";
-        case 'balearic-islands':
-            return "https://source.unsplash.com/featured/800x450?ibiza&yacht";
-        case 'caribbean':
-            return "https://source.unsplash.com/featured/800x450?caribbean&yacht";
-        case 'corsica-and-sardinia':
-            return "https://source.unsplash.com/featured/800x450?corsica&yacht";
-        case 'croatia-and-montenegro':
-            return "https://source.unsplash.com/featured/800x450?croatia&yacht";
-        case 'french-polynesia':
-            return "https://source.unsplash.com/featured/800x450?bora-bora&yacht";
-        case 'french-riviera':
-            return "https://source.unsplash.com/featured/800x450?monaco&yacht";
-        case 'galapagos':
-            return "https://source.unsplash.com/featured/800x450?galapagos&yacht";
-        case 'greek-islands':
-            return "https://source.unsplash.com/featured/800x450?greece&yacht";
-        case 'indonesia':
-            return "https://source.unsplash.com/featured/800x450?bali&yacht";
-        case 'italian-riviera':
-            return "https://source.unsplash.com/featured/800x450?amalfi&yacht";
-        case 'malaysia':
-            return "https://source.unsplash.com/featured/800x450?malaysia&yacht";
-        case 'maldives':
-            return "https://source.unsplash.com/featured/800x450?maldives&yacht";
-        case 'red-sea':
-            return "https://source.unsplash.com/featured/800x450?redsea&yacht";
-        case 'seychelles':
-            return "https://source.unsplash.com/featured/800x450?seychelles&yacht";
-        case 'sicily-and-aeolian-islands':
-            return "https://source.unsplash.com/featured/800x450?sicily&yacht";
-        case 'south-pacific':
-            return "https://source.unsplash.com/featured/800x450?pacific&yacht";
-        case 'thailand':
-            return "https://source.unsplash.com/featured/800x450?thailand&yacht";
-        case 'turkish-riviera':
-            return "https://source.unsplash.com/featured/800x450?turkey&yacht";
-        case 'uk':
-            return "https://source.unsplash.com/featured/800x450?uk&yacht";
-        default:
-            // Default destination image if none of the specific ones match
-            return "https://source.unsplash.com/featured/800x450?destination&yacht";
-    }
+    // Default fallback image for any destination not in the map
+    $default_image = 'https://yachtstory.com/wp-content/uploads/2024/02/yacht-destination.jpg';
+    
+    // Return the mapped image or default
+    return isset($destination_map[$destination_name]) ? $destination_map[$destination_name] : $default_image;
 } 
