@@ -56,6 +56,7 @@ function handle_get_request() {
                 (SELECT pm3.meta_value FROM wp_postmeta pm3 WHERE pm3.post_id = p.ID AND pm3.meta_key = 'best_time_to_visit' LIMIT 1) as best_time_to_visit,
                 (SELECT pm4.meta_value FROM wp_postmeta pm4 WHERE pm4.post_id = p.ID AND pm4.meta_key = 'climate' LIMIT 1) as climate,
                 (SELECT pm5.meta_value FROM wp_postmeta pm5 WHERE pm5.post_id = p.ID AND pm5.meta_key = '_thumbnail_id' LIMIT 1) as featured_image_id,
+                (SELECT pm6.meta_value FROM wp_postmeta pm6 WHERE pm6.post_id = p.ID AND pm6.meta_key = 'featured_image_url' LIMIT 1) as direct_featured_image,
                 p.post_modified as updated_at
             FROM 
                 wp_posts p
@@ -93,15 +94,21 @@ function handle_get_request() {
                 $image = $image_result->fetch_assoc();
                 $destination['featured_image'] = $image['guid'];
             } else {
-                $destination['featured_image'] = '';
+                // Check if we have a direct image URL stored
+                $destination['featured_image'] = !empty($destination['direct_featured_image']) ? 
+                    $destination['direct_featured_image'] : 
+                    get_default_image_for_destination($destination['name']);
             }
             
             $image_stmt->close();
             unset($destination['featured_image_id']);
         } else {
-            $destination['featured_image'] = '';
-            unset($destination['featured_image_id']);
+            // Try to use direct featured image URL if available
+            $destination['featured_image'] = !empty($destination['direct_featured_image']) ? 
+                $destination['direct_featured_image'] : 
+                get_default_image_for_destination($destination['name']);
         }
+        unset($destination['direct_featured_image']); // Remove this field from the response
         
         // Convert highlights to array if it's serialized
         if (!empty($destination['highlights'])) {
@@ -147,6 +154,7 @@ function handle_get_request() {
                 (SELECT pm3.meta_value FROM wp_postmeta pm3 WHERE pm3.post_id = p.ID AND pm3.meta_key = 'best_time_to_visit' LIMIT 1) as best_time_to_visit,
                 (SELECT pm4.meta_value FROM wp_postmeta pm4 WHERE pm4.post_id = p.ID AND pm4.meta_key = 'climate' LIMIT 1) as climate,
                 (SELECT pm5.meta_value FROM wp_postmeta pm5 WHERE pm5.post_id = p.ID AND pm5.meta_key = '_thumbnail_id' LIMIT 1) as featured_image_id,
+                (SELECT pm6.meta_value FROM wp_postmeta pm6 WHERE pm6.post_id = p.ID AND pm6.meta_key = 'featured_image_url' LIMIT 1) as direct_featured_image,
                 p.post_modified as updated_at
             FROM 
                 wp_posts p
@@ -181,14 +189,20 @@ function handle_get_request() {
                     $image = $image_result->fetch_assoc();
                     $row['featured_image'] = $image['guid'];
                 } else {
-                    $row['featured_image'] = '';
+                    // Check if we have a direct image URL stored
+                    $row['featured_image'] = !empty($row['direct_featured_image']) ? 
+                        $row['direct_featured_image'] : 
+                        get_default_image_for_destination($row['name']);
                 }
                 
                 unset($row['featured_image_id']);
             } else {
-                $row['featured_image'] = '';
-                unset($row['featured_image_id']);
+                // Try to use direct featured image URL if available
+                $row['featured_image'] = !empty($row['direct_featured_image']) ? 
+                    $row['direct_featured_image'] : 
+                    get_default_image_for_destination($row['name']);
             }
+            unset($row['direct_featured_image']); // Remove this field from the response
             
             // Convert highlights to array if it's serialized
             if (!empty($row['highlights'])) {
@@ -294,4 +308,75 @@ function json_response($data, $status_code = 200) {
     http_response_code($status_code);
     echo json_encode($data);
     exit;
+}
+
+/**
+ * Get a default image URL for a destination based on its name
+ * 
+ * @param string $destination_name The name of the destination
+ * @return string The URL to a default image
+ */
+function get_default_image_for_destination($destination_name) {
+    // Normalize destination name for use in URL
+    $normalized_name = strtolower(str_replace(['&amp;', ' & ', ' '], ['and', '-', '-'], $destination_name));
+    
+    // Define possible image paths
+    $possible_paths = [
+        // Original WordPress media URLs
+        "https://www.yachtstory.com/wp-content/uploads/destinations/{$normalized_name}.jpg",
+        "https://www.yachtstory.com/wp-content/uploads/destinations/{$normalized_name}.png",
+        
+        // Local storage
+        "/images/destinations/{$normalized_name}.jpg",
+        
+        // Specific destinations with custom images
+        // These can be expanded for each destination
+    ];
+    
+    // Destination-specific overrides
+    switch ($normalized_name) {
+        case 'bahamas':
+            return "https://source.unsplash.com/featured/800x450?bahamas&yacht";
+        case 'balearic-islands':
+            return "https://source.unsplash.com/featured/800x450?ibiza&yacht";
+        case 'caribbean':
+            return "https://source.unsplash.com/featured/800x450?caribbean&yacht";
+        case 'corsica-and-sardinia':
+            return "https://source.unsplash.com/featured/800x450?corsica&yacht";
+        case 'croatia-and-montenegro':
+            return "https://source.unsplash.com/featured/800x450?croatia&yacht";
+        case 'french-polynesia':
+            return "https://source.unsplash.com/featured/800x450?bora-bora&yacht";
+        case 'french-riviera':
+            return "https://source.unsplash.com/featured/800x450?monaco&yacht";
+        case 'galapagos':
+            return "https://source.unsplash.com/featured/800x450?galapagos&yacht";
+        case 'greek-islands':
+            return "https://source.unsplash.com/featured/800x450?greece&yacht";
+        case 'indonesia':
+            return "https://source.unsplash.com/featured/800x450?bali&yacht";
+        case 'italian-riviera':
+            return "https://source.unsplash.com/featured/800x450?amalfi&yacht";
+        case 'malaysia':
+            return "https://source.unsplash.com/featured/800x450?malaysia&yacht";
+        case 'maldives':
+            return "https://source.unsplash.com/featured/800x450?maldives&yacht";
+        case 'red-sea':
+            return "https://source.unsplash.com/featured/800x450?redsea&yacht";
+        case 'seychelles':
+            return "https://source.unsplash.com/featured/800x450?seychelles&yacht";
+        case 'sicily-and-aeolian-islands':
+            return "https://source.unsplash.com/featured/800x450?sicily&yacht";
+        case 'south-pacific':
+            return "https://source.unsplash.com/featured/800x450?pacific&yacht";
+        case 'thailand':
+            return "https://source.unsplash.com/featured/800x450?thailand&yacht";
+        case 'turkish-riviera':
+            return "https://source.unsplash.com/featured/800x450?turkey&yacht";
+        case 'uk':
+            return "https://source.unsplash.com/featured/800x450?uk&yacht";
+        default:
+            // Default destination image if none of the specific ones match
+            return "https://source.unsplash.com/featured/800x450?destination&yacht";
+    }
 } 
