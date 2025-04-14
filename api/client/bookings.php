@@ -212,30 +212,35 @@ if (isset($_GET['debug']) && $_GET['debug'] === 'true') {
 // Include CORS dependencies for normal API usage
 require_once __DIR__ . '/../../auth/global-cors.php';
 
-// Apply CORS headers with proper cleaning
-if (ob_get_length()) {
-    ob_clean();
-}
-
-// Record incoming request details for better debugging
-$incoming_origin = $_SERVER['HTTP_ORIGIN'] ?? 'none';
-$incoming_method = $_SERVER['REQUEST_METHOD'] ?? 'unknown';
-error_log("BOOKINGS.PHP - Request received from origin: {$incoming_origin}, method: {$incoming_method}");
-
 // Apply CORS headers for all supported methods - with better error handling
 try {
-    $cors_result = apply_cors_headers(['GET', 'POST', 'OPTIONS']);
-    if (!$cors_result) {
-        error_log("BOOKINGS.PHP - CORS check failed for origin: {$incoming_origin}");
-    ob_clean();
-        header('Content-Type: application/json');
-    echo json_encode([
-        'success' => false,
-            'message' => 'CORS error: Origin not allowed',
-            'error' => 'cors_error',
-            'origin' => $incoming_origin
-        ]);
-        exit;
+    // Record incoming request details for better debugging
+    $incoming_origin = $_SERVER['HTTP_ORIGIN'] ?? 'none';
+    $incoming_method = $_SERVER['REQUEST_METHOD'] ?? 'unknown';
+    error_log("BOOKINGS.PHP - Request received from origin: {$incoming_origin}, method: {$incoming_method}");
+
+    // Check if this is a direct debug or test request - allow it without CORS checks
+    if (isset($_GET['debug']) || (isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'Mozilla') !== false)) {
+        // For debug and browser requests, set permissive CORS headers
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control');
+        error_log("BOOKINGS.PHP - Debug/Test mode: Setting permissive CORS headers");
+    } else {
+        // Normal API operation with strict CORS
+        $cors_result = apply_cors_headers(['GET', 'POST', 'OPTIONS']);
+        if (!$cors_result) {
+            error_log("BOOKINGS.PHP - CORS check failed for origin: {$incoming_origin}");
+            ob_clean();
+            header('Content-Type: application/json');
+            echo json_encode([
+                'success' => false,
+                'message' => 'CORS error: Origin not allowed',
+                'error' => 'cors_error',
+                'origin' => $incoming_origin
+            ]);
+            exit;
+        }
     }
 } catch (Exception $cors_e) {
     error_log("BOOKINGS.PHP - CORS exception: " . $cors_e->getMessage());

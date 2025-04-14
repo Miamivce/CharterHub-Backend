@@ -6,41 +6,89 @@
  * It provides detailed information about the database, tables, and queries
  */
 
-// Define CHARTERHUB_LOADED constant if not already defined
+// Start output buffering immediately
+ob_start();
+
+// Define CHARTERHUB_LOADED constant first
 if (!defined('CHARTERHUB_LOADED')) {
     define('CHARTERHUB_LOADED', true);
 }
 
-// Include dependencies
-require_once __DIR__ . '/../../utils/database.php';
-require_once __DIR__ . '/../../auth/jwt-core.php';
+// Prevent direct output
+error_reporting(0);
+@ini_set('display_errors', 0);
 
-// Enable error reporting for debugging
+// Include required files
+require_once '../../config/config.php';
+require_once '../../utils/database.php';
+require_once '../../utils/ensure-views.php';
+require_once '../../utils/auth.php';
+
+// Capture any unexpected output from included files
+$unexpected_output = ob_get_clean();
+
+// Reset output buffer
+ob_start();
+
+// Now we can enable error reporting for our script
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
-// Set appropriate headers
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+// Initialize debug info with server information
+$debug_info = [
+    'success' => true,
+    'timestamp' => date('Y-m-d H:i:s'),
+    'php_version' => PHP_VERSION,
+    'server' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
+    'request' => [
+        'method' => $_SERVER['REQUEST_METHOD'] ?? 'unknown',
+        'uri' => $_SERVER['REQUEST_URI'] ?? 'unknown',
+        'user_id' => isset($_GET['user_id']) ? intval($_GET['user_id']) : 0,
+    ]
+];
 
-// Handle options request for CORS
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
+// If there was unexpected output, add it to the debug info
+if (!empty($unexpected_output)) {
+    $debug_info['warnings'] = [
+        'unexpected_output' => substr($unexpected_output, 0, 500), // Limit to 500 chars
+        'message' => 'Unexpected output detected from included files'
+    ];
+}
+
+// Include additional dependencies
+require_once __DIR__ . '/../../auth/jwt-core.php';
+
+// Function to safely output JSON and exit
+function debug_json_response($data, $status_code = 200) {
+    // Clean any previous output by flushing all buffers
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    
+    // Start fresh output buffer
+    ob_start();
+    
+    // Set headers
+    http_response_code($status_code);
+    header('Content-Type: application/json');
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    
+    // Output JSON
+    echo json_encode($data, JSON_PRETTY_PRINT);
+    
+    // Flush buffer and exit
+    ob_end_flush();
     exit;
 }
 
-/**
- * Output a JSON response
- * 
- * @param array $data The data to output
- * @param int $status HTTP status code
- */
-function debug_json_response($data, $status = 200) {
-    http_response_code($status);
-    echo json_encode($data, JSON_PRETTY_PRINT);
-    exit;
+// Handle CORS OPTIONS request immediately
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    debug_json_response([
+        'success' => true,
+        'message' => 'CORS preflight request successful'
+    ], 200);
 }
 
 // Get authorization header
@@ -48,19 +96,9 @@ $headers = getallheaders();
 $auth_header = isset($headers['Authorization']) ? $headers['Authorization'] : '';
 $user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
 
-// Main debugging information collector
-$debug_info = [
-    'success' => true,
-    'timestamp' => date('Y-m-d H:i:s'),
-    'php_version' => PHP_VERSION,
-    'server' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
-    'request' => [
-        'method' => $_SERVER['REQUEST_METHOD'],
-        'uri' => $_SERVER['REQUEST_URI'],
-        'user_id' => $user_id,
-        'auth_header' => $auth_header ? substr($auth_header, 0, 20) . '...' : 'None'
-    ]
-];
+// Update request info
+$debug_info['request']['auth_header'] = $auth_header ? substr($auth_header, 0, 20) . '...' : 'None';
+$debug_info['request']['user_id'] = $user_id;
 
 try {
     // Try to connect to the database
@@ -169,12 +207,14 @@ try {
     // Return diagnostic information
     debug_json_response($debug_info);
     
-} catch (Exception $e) {
-    debug_json_response([
-        'success' => false,
-        'error' => $e->getMessage(),
-        'file' => $e->getFile(),
-        'line' => $e->getLine(),
+} catch (PDOException $e) {
+    $debug_info['success'] = false;
+    $debug_info['error'] = [
+        'message' => 'Database connection failed',
+        'details' => $e->getMessage(),
+        'code' => $e->getCode(),
         'trace' => explode("\n", $e->getTraceAsString())
-    ], 500);
+    ];
+    
+    debug_json_response($debug_info, 500);
 } 
