@@ -163,7 +163,7 @@ function blacklist_all_user_tokens($user_id, $reason = 'security') {
         revoke_all_user_tokens($user_id);
         
         // Now, get active tokens for this user
-        $tokens = fetchAll(
+        $tokens = fetchRows(
             "SELECT token_hash, refresh_token_hash FROM wp_charterhub_jwt_tokens 
              WHERE user_id = ? AND revoked = 0",
             [$user_id]
