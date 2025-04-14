@@ -637,26 +637,26 @@ function json_response($data, $status_code = 200) {
 function get_default_image_for_destination($destination_name) {
     // Map of destination names to local image paths
     $destination_images = [
-        'BAHAMAS' => '/images/destinations/bahamas.jpg',
-        'BALEARIC ISLANDS' => '/images/destinations/balearic.jpg',
-        'CARIBBEAN' => '/images/destinations/caribbean.jpg',
-        'CORSICA & SARDINIA' => '/images/destinations/corsica.jpg',
-        'CROATIA & MONTENEGRO' => '/images/destinations/croatia.jpg',
-        'FRENCH POLYNESIA' => '/images/destinations/french-polynesia.jpg',
-        'FRENCH RIVIERA' => '/images/destinations/french-riviera.jpg',
-        'GALAPAGOS' => '/images/destinations/galapagos.jpg',
-        'GREEK ISLANDS' => '/images/destinations/greek-islands.jpg',
-        'INDONESIA' => '/images/destinations/indonesia.jpg',
-        'ITALIAN RIVIERA' => '/images/destinations/italian-riviera.jpg',
-        'MALAYSIA' => '/images/destinations/malaysia.jpg',
-        'MALDIVES' => '/images/destinations/maldives.jpg',
-        'RED SEA' => '/images/destinations/red-sea.jpg',
-        'SEYCHELLES' => '/images/destinations/seychelles.jpg',
-        'SICILY & AEOLIAN ISLANDS' => '/images/destinations/sicily.jpg',
-        'SOUTH PACIFIC' => '/images/destinations/south-pacific.jpg',
-        'THAILAND' => '/images/destinations/thailand.jpg',
-        'TURKISH RIVIERA' => '/images/destinations/turkish-riviera.jpg',
-        'UK' => '/images/destinations/uk.jpg',
+        'BAHAMAS' => '/public/images/destinations/bahamas.jpg',
+        'BALEARIC ISLANDS' => '/public/images/destinations/balearic.jpg',
+        'CARIBBEAN' => '/public/images/destinations/caribbean.jpg',
+        'CORSICA & SARDINIA' => '/public/images/destinations/corsica.jpg',
+        'CROATIA & MONTENEGRO' => '/public/images/destinations/croatia.jpg',
+        'FRENCH POLYNESIA' => '/public/images/destinations/french-polynesia.jpg',
+        'FRENCH RIVIERA' => '/public/images/destinations/french-riviera.jpg',
+        'GALAPAGOS' => '/public/images/destinations/galapagos.jpg',
+        'GREEK ISLANDS' => '/public/images/destinations/greek-islands.jpg',
+        'INDONESIA' => '/public/images/destinations/indonesia.jpg',
+        'ITALIAN RIVIERA' => '/public/images/destinations/italian-riviera.jpg',
+        'MALAYSIA' => '/public/images/destinations/malaysia.jpg',
+        'MALDIVES' => '/public/images/destinations/maldives.jpg',
+        'RED SEA' => '/public/images/destinations/red-sea.jpg',
+        'SEYCHELLES' => '/public/images/destinations/seychelles.jpg',
+        'SICILY & AEOLIAN ISLANDS' => '/public/images/destinations/sicily.jpg',
+        'SOUTH PACIFIC' => '/public/images/destinations/south-pacific.jpg',
+        'THAILAND' => '/public/images/destinations/thailand.jpg',
+        'TURKISH RIVIERA' => '/public/images/destinations/turkish-riviera.jpg',
+        'UK' => '/public/images/destinations/uk.jpg',
     ];
     
     // Clean the destination name for comparison
@@ -671,7 +671,7 @@ function get_default_image_for_destination($destination_name) {
     
     // Default generic destination image
     $site_url = get_site_url();
-    return rtrim($site_url, '/') . '/images/destinations/default.jpg';
+    return rtrim($site_url, '/') . '/public/images/destinations/default.jpg';
 }
 
 // Get the site URL
