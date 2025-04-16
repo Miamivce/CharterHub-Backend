@@ -8,45 +8,36 @@
  * Supports:
  * - GET: List all admin users
  * - POST: Create or update an admin user
+ * - DELETE: Delete an admin user
  * 
  * FOR DEVELOPMENT USE ONLY - NOT FOR PRODUCTION
  */
 
-// Include auth helper
+// Define the CHARTERHUB_LOADED constant to grant access to included files
+define('CHARTERHUB_LOADED', true);
+
+// Include auth helper with the handle_admin_request function
 require_once __DIR__ . '/direct-auth-helper.php';
 
-// Enable CORS - Must be called before any output or processing
-apply_cors_headers();
-
-// Initialize response
-$response = [
-    'success' => false,
-    'message' => 'Initializing request',
-];
-
-// Ensure admin access
-ensure_admin_access();
-
-// Handle different HTTP methods
-switch ($_SERVER['REQUEST_METHOD']) {
-    case 'GET':
-        handle_get_request();
-        break;
-    case 'POST':
-        handle_post_request();
-        break;
-    case 'DELETE':
-        handle_delete_request();
-        break;
-    default:
-        json_response([
-            'success' => false,
-            'message' => 'Method not allowed'
-        ], 405);
-}
+// Use the admin request handler to properly handle CORS and authentication
+handle_admin_request(function($admin_user) {
+    // Handle different HTTP methods
+    switch ($_SERVER['REQUEST_METHOD']) {
+        case 'GET':
+            return handle_get_request();
+        case 'POST':
+            return handle_post_request();
+        case 'DELETE':
+            return handle_delete_request();
+        default:
+            throw new Exception('Method not allowed');
+    }
+});
 
 /**
  * Handle GET request - List admin users
+ * 
+ * @return array Admin users data
  */
 function handle_get_request() {
     $conn = get_database_connection();
@@ -103,15 +94,14 @@ function handle_get_request() {
     $conn->close();
     
     // Return users
-    json_response([
-        'success' => true,
+    return [
         'message' => 'Users retrieved successfully',
         'users' => $users,
         'meta' => [
             'total' => count($users),
             'role_filter' => $role
         ]
-    ]);
+    ];
 }
 
 /**
@@ -126,10 +116,10 @@ function handle_post_request() {
     
     if (!$input) {
         error_log("Failed to parse JSON request body");
-        json_response([
+        return [
             'success' => false,
             'message' => 'Invalid request body - unable to parse JSON'
-        ], 400);
+        ];
     }
     
     error_log("Parsed create/update admin user request data: " . print_r($input, true));
@@ -157,19 +147,19 @@ function handle_post_request() {
         
         if (!$creator) {
             error_log("Creator not found or not an admin: " . $creator_email);
-            json_response([
+            return [
                 'success' => false,
                 'message' => 'Creator verification failed: Admin not found'
-            ], 401);
+            ];
         }
         
         // Verify password
         if (!password_verify($creator_password, $creator['password'])) {
             error_log("Creator password verification failed for: " . $creator_email);
-            json_response([
+            return [
                 'success' => false,
                 'message' => 'Creator verification failed: Invalid password'
-            ], 401);
+            ];
         }
         
         error_log("Creator verified successfully: " . $creator_email);
@@ -177,10 +167,10 @@ function handle_post_request() {
         // For new user creation without creator verification, require admin auth check
         if (!is_admin_user()) {
             error_log("Attempt to create admin without verification or valid admin session");
-            json_response([
+            return [
                 'success' => false,
                 'message' => 'Admin verification required to create new admin users'
-            ], 401);
+            ];
         }
     }
     
@@ -192,10 +182,10 @@ function handle_post_request() {
                       (empty($input['email']) ? "email " : "") . 
                       (empty($input['password']) ? "password" : ""));
             
-            json_response([
+            return [
                 'success' => false,
                 'message' => 'Email and password are required for new users'
-            ], 400);
+            ];
         }
         
         // Check if email exists
@@ -207,10 +197,10 @@ function handle_post_request() {
         if ($result->num_rows > 0) {
             $stmt->close();
             error_log("User creation failed - email already exists: {$input['email']}");
-            json_response([
+            return [
                 'success' => false,
                 'message' => 'Email already exists'
-            ], 400);
+            ];
         }
         $stmt->close();
     }
@@ -313,10 +303,10 @@ function handle_post_request() {
             
             if ($stmt->affected_rows === 0) {
                 $stmt->close();
-                json_response([
+                return [
                     'success' => false,
                     'message' => 'User not found or no changes made'
-                ], 404);
+                ];
             }
             
             $stmt->close();
@@ -331,16 +321,16 @@ function handle_post_request() {
         
         if ($result->num_rows === 0) {
             $stmt->close();
-            json_response([
+            return [
                 'success' => false,
                 'message' => 'Failed to retrieve updated user'
-            ], 500);
+            ];
         }
         
         $user = $result->fetch_assoc();
         $stmt->close();
         
-        json_response([
+        return [
             'success' => true,
             'message' => 'User updated successfully',
             'user' => [
@@ -354,7 +344,7 @@ function handle_post_request() {
                 'role' => $user['role'],
                 'verified' => (bool)$user['verified']
             ]
-        ]);
+        ];
     } else {
         // Create new user
         $email = sanitize_input($input['email']);
@@ -423,10 +413,10 @@ function handle_post_request() {
             
             if (!$stmt) {
                 error_log("Failed to prepare insert statement: " . $conn->error);
-                json_response([
+                return [
                     'success' => false,
                     'message' => 'Database error: Failed to prepare statement - ' . $conn->error
-                ], 500);
+                ];
             }
             
             $stmt->bind_param("sssssssssi", $email, $password, $username, $first_name, $last_name, $display_name, $phone, $company, $role, $verified);
@@ -435,19 +425,19 @@ function handle_post_request() {
             if (!$result) {
                 error_log("Failed to execute insert statement: " . $stmt->error);
                 $stmt->close();
-                json_response([
+                return [
                     'success' => false,
                     'message' => 'Database error: Failed to create user - ' . $stmt->error
-                ], 500);
+                ];
             }
             
             if ($stmt->affected_rows === 0) {
                 $stmt->close();
                 error_log("No rows affected by insert statement");
-                json_response([
+                return [
                     'success' => false,
                     'message' => 'Failed to create user: No rows inserted'
-                ], 500);
+                ];
             }
             
             $user_id = $stmt->insert_id;
@@ -465,16 +455,16 @@ function handle_post_request() {
             if ($result->num_rows === 0) {
                 $stmt->close();
                 error_log("Failed to retrieve created user with ID: $user_id");
-                json_response([
+                return [
                     'success' => false,
                     'message' => 'User created but failed to retrieve user details'
-                ], 500);
+                ];
             }
             
             $user = $result->fetch_assoc();
             $stmt->close();
             
-            json_response([
+            return [
                 'success' => true,
                 'message' => 'User created successfully',
                 'user' => [
@@ -488,13 +478,13 @@ function handle_post_request() {
                     'role' => $user['role'],
                     'verified' => (bool)$user['verified']
                 ]
-            ]);
+            ];
         } catch (Exception $e) {
             error_log("Exception during user creation: " . $e->getMessage());
-            json_response([
+            return [
                 'success' => false,
                 'message' => 'Exception during user creation: ' . $e->getMessage()
-            ], 500);
+            ];
         }
     }
 }
@@ -507,10 +497,10 @@ function handle_delete_request() {
     $user_id = isset($_GET['id']) ? (int)$_GET['id'] : null;
     
     if (!$user_id) {
-        json_response([
+        return [
             'success' => false,
             'message' => 'User ID is required'
-        ], 400);
+        ];
     }
     
     $conn = get_database_connection();
@@ -523,10 +513,10 @@ function handle_delete_request() {
     
     if ($result->num_rows === 0) {
         $stmt->close();
-        json_response([
+        return [
             'success' => false,
             'message' => 'Admin user not found'
-        ], 404);
+        ];
     }
     $stmt->close();
     
@@ -537,18 +527,18 @@ function handle_delete_request() {
     
     if ($stmt->affected_rows === 0) {
         $stmt->close();
-        json_response([
+        return [
             'success' => false,
             'message' => 'Failed to delete user'
-        ], 500);
+        ];
     }
     
     $stmt->close();
     $conn->close();
     
-    json_response([
+    return [
         'success' => true,
         'message' => 'User deleted successfully'
-    ]);
+    ];
 }
 ?> 

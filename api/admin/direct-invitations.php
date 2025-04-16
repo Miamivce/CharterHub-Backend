@@ -9,99 +9,38 @@
  * FOR DEVELOPMENT USE ONLY - NOT FOR PRODUCTION
  */
 
-// Manually handle CORS for this endpoint
-$allowed_origins = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:8000',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:8000',
-    'https://charterhub.yachtstory.com',
-    'https://staging-charterhub.yachtstory.com'
-];
-
-$origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
-
-// Set CORS headers based on origin
-if (in_array($origin, $allowed_origins)) {
-    header("Access-Control-Allow-Origin: $origin");
-    header("Access-Control-Allow-Credentials: true");
-    header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-    header("Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control, Pragma");
-    header("Access-Control-Max-Age: 86400"); // 24 hours
-} else if (empty($origin)) {
-    // Default fallback if no origin is provided
-    header("Access-Control-Allow-Origin: http://localhost:3000");
-    header("Access-Control-Allow-Credentials: true");
-    header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-    header("Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control, Pragma");
-    header("Access-Control-Max-Age: 86400"); // 24 hours
-} else {
-    // Log if origin is not allowed
-    error_log("DIRECT-INVITATIONS: Request from non-allowed origin: $origin");
-    // Don't set CORS headers for non-allowed origins
-}
-
-// Set JSON content type
-header('Content-Type: application/json');
-
-// Handle preflight requests immediately before other processing
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
-
-// Require authentication and include necessary files here
-require_once dirname(__FILE__) . '/../../config/database.php';
-require_once dirname(__FILE__) . '/../../includes/auth-functions.php';
-require_once dirname(__FILE__) . '/../../includes/response-helpers.php';
-require_once dirname(__FILE__) . '/direct-auth-helper.php';
-
-// Define a constant to prevent direct access to included files
+// Define the CHARTERHUB_LOADED constant to grant access to included files
 define('CHARTERHUB_LOADED', true);
 
-// Initialize response
-$response = [
-    'success' => false,
-    'message' => '',
-    'data' => null
-];
+// Include auth helper with the handle_admin_request function
+require_once __DIR__ . '/direct-auth-helper.php';
 
-// Ensure the user is authenticated as an admin
-try {
-    $admin_info = ensure_admin_access();
-} catch (Exception $e) {
-    $response['message'] = 'Unauthorized. Admin access required.';
-    echo json_encode($response);
-    exit;
-}
-
-// Determine which function to call based on the HTTP method and parameters
-$method = $_SERVER['REQUEST_METHOD'];
-
-if ($method === 'GET') {
-    handle_check_invitation_status();
-} else if ($method === 'POST') {
-    handle_generate_invitation();
-} else {
-    $response['message'] = 'Unsupported method';
-    echo json_encode($response);
-    exit;
-}
+// Use the admin request handler to properly handle CORS and authentication
+handle_admin_request(function($admin_user) {
+    // Handle different HTTP methods
+    switch ($_SERVER['REQUEST_METHOD']) {
+        case 'GET':
+            return handle_check_invitation_status();
+        case 'POST':
+            return handle_generate_invitation();
+        default:
+            throw new Exception('Method not allowed');
+    }
+});
 
 /**
  * Handle checking the status of invitations for a client
+ * 
+ * @return array Invitation status data
  */
 function handle_check_invitation_status() {
     // Check if client ID is provided
     if (!isset($_GET['client_id']) || empty($_GET['client_id'])) {
-        echo json_encode([
+        return [
             'success' => false,
             'error' => 'missing_client_id',
             'message' => 'Client ID is required'
-        ]);
-        exit;
+        ];
     }
 
     $client_id = trim($_GET['client_id']);
@@ -119,12 +58,11 @@ function handle_check_invitation_status() {
         $stmt->close();
         
         if (!$client) {
-            echo json_encode([
+            return [
                 'success' => false,
                 'error' => 'client_not_found',
                 'message' => 'Client not found'
-            ]);
-            exit;
+            ];
         }
         
         // Find invitations for this client's email
@@ -198,23 +136,21 @@ function handle_check_invitation_status() {
             }
         }
         
-        $conn->close();
-        echo json_encode($response);
+        return $response;
         
     } catch (Exception $e) {
-        error_log("CHECK-INVITATION-STATUS ERROR: " . $e->getMessage());
-        error_log("CHECK-INVITATION-STATUS ERROR TRACE: " . $e->getTraceAsString());
-        
-        echo json_encode([
+        return [
             'success' => false,
-            'error' => 'server_error',
-            'message' => 'An error occurred while checking invitation status'
-        ]);
+            'error' => 'exception',
+            'message' => 'Error checking invitation status: ' . $e->getMessage()
+        ];
     }
 }
 
 /**
  * Handle generating a new invitation for a client
+ * 
+ * @return array Generated invitation data
  */
 function handle_generate_invitation() {
     // Get JSON data from request body
@@ -223,12 +159,11 @@ function handle_generate_invitation() {
     
     // Check if client ID is provided
     if (!isset($data['clientId']) || empty($data['clientId'])) {
-        echo json_encode([
+        return [
             'success' => false,
             'error' => 'missing_client_id',
             'message' => 'Client ID is required'
-        ]);
-        exit;
+        ];
     }
     
     $client_id = trim($data['clientId']);
@@ -260,12 +195,11 @@ function handle_generate_invitation() {
             
             if (!$client) {
                 $conn->rollback();
-                echo json_encode([
+                return [
                     'success' => false,
                     'error' => 'client_not_found',
                     'message' => 'Client not found'
-                ]);
-                exit;
+                ];
             }
         }
         
@@ -314,12 +248,11 @@ function handle_generate_invitation() {
                 error_log("DIRECT-INVITATION: Force-generating invitation for registered client ID: {$client_id}");
             } else {
                 $conn->rollback();
-                echo json_encode([
+                return [
                     'success' => false,
                     'error' => 'client_already_registered',
                     'message' => 'This client has already registered and completed account setup. Invitation links cannot be generated for registered clients.'
-                ]);
-                exit;
+                ];
             }
         } else if ($clientAccount && !empty($clientAccount['password']) && $clientAccount['verified'] == 1) {
             // Client is registered and verified but hasn't logged in yet
@@ -363,15 +296,14 @@ function handle_generate_invitation() {
             $invitation_url = "{$frontend_url}/register?invited=true&token={$existingInvitation['token']}";
             
             $conn->commit();
-            echo json_encode([
+            return [
                 'success' => true,
                 'message' => 'Active invitation already exists',
                 'invitation_id' => $existingInvitation['id'],
                 'invitation_url' => $invitation_url,
                 'expires_at' => $existingInvitation['expires_at'],
                 'is_new' => false
-            ]);
-            exit;
+            ];
         }
         
         // Generate a new invitation token
@@ -440,14 +372,14 @@ function handle_generate_invitation() {
         $invitation_url = "{$frontend_url}/register?invited=true&token={$token}";
         
         // Return the invitation details
-        echo json_encode([
+        return [
             'success' => true,
             'message' => 'Invitation generated successfully',
             'invitation_id' => $invitation_id,
             'invitation_url' => $invitation_url,
             'expires_at' => $expires_at,
             'is_new' => true
-        ]);
+        ];
         
     } catch (Exception $e) {
         // Rollback on error
@@ -458,11 +390,11 @@ function handle_generate_invitation() {
         error_log("GENERATE-INVITATION ERROR: " . $e->getMessage());
         error_log("GENERATE-INVITATION ERROR TRACE: " . $e->getTraceAsString());
         
-        echo json_encode([
+        return [
             'success' => false,
             'error' => 'server_error',
             'message' => 'An error occurred while generating the invitation: ' . $e->getMessage()
-        ]);
+        ];
     }
 }
 ?> 
