@@ -27,10 +27,13 @@ handle_admin_request(function($admin) {
                 $db = getDbConnection();
                 error_log("DIRECT-CUSTOMERS: Connected to database for GET request");
                 
-                // Fetch customers data
-                $stmt = $db->prepare("SELECT * FROM wp_charterhub_customers ORDER BY created_at DESC");
+                // Fetch customers data - note: customers are users with role='client'
+                $stmt = $db->prepare("SELECT id, username, email, first_name, last_name, role, status, created_at, updated_at 
+                                     FROM wp_charterhub_users 
+                                     WHERE role = 'client' 
+                                     ORDER BY created_at DESC");
                 $stmt->execute();
-                error_log("DIRECT-CUSTOMERS: Executed SELECT query on wp_charterhub_customers");
+                error_log("DIRECT-CUSTOMERS: Executed SELECT query on wp_charterhub_users for clients");
                 
                 $customers = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 
@@ -48,8 +51,8 @@ handle_admin_request(function($admin) {
                 }
                 
                 // Basic validation
-                if (empty($input['name']) || empty($input['email'])) {
-                    throw new Exception('Name and email are required', 400);
+                if (empty($input['email'])) {
+                    throw new Exception('Email is required', 400);
                 }
                 
                 // Create customer logic
@@ -57,7 +60,7 @@ handle_admin_request(function($admin) {
                 error_log("DIRECT-CUSTOMERS: Connected to database for POST request");
                 
                 // Check if email already exists
-                $stmt = $db->prepare("SELECT id FROM wp_charterhub_customers WHERE email = ?");
+                $stmt = $db->prepare("SELECT id FROM wp_charterhub_users WHERE email = ?");
                 $stmt->execute([$input['email']]);
                 error_log("DIRECT-CUSTOMERS: Checked if email exists: " . $input['email']);
                 
@@ -65,21 +68,23 @@ handle_admin_request(function($admin) {
                     throw new Exception('Customer with this email already exists', 400);
                 }
                 
-                // Insert new customer
+                // Generate username if not provided
+                $username = $input['username'] ?? explode('@', $input['email'])[0] . '_' . substr(md5(time()), 0, 6);
+                
+                // Insert new customer as a user with role='client'
                 $stmt = $db->prepare("
-                    INSERT INTO wp_charterhub_customers (name, email, phone, company, notes, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO wp_charterhub_users (username, email, first_name, last_name, role, status, created_by)
+                    VALUES (?, ?, ?, ?, 'client', 'active', ?)
                 ");
                 
                 $admin_id = $admin['user_id'] ?? $admin['id'] ?? 0;
                 error_log("DIRECT-CUSTOMERS: Inserting new customer with admin ID: " . $admin_id);
                 
                 $stmt->execute([
-                    sanitizeInput($input['name']),
+                    sanitizeInput($username),
                     sanitizeInput($input['email']),
-                    sanitizeInput($input['phone'] ?? ''),
-                    sanitizeInput($input['company'] ?? ''),
-                    sanitizeInput($input['notes'] ?? ''),
+                    sanitizeInput($input['first_name'] ?? ''),
+                    sanitizeInput($input['last_name'] ?? ''),
                     $admin_id
                 ]);
                 
@@ -101,20 +106,20 @@ handle_admin_request(function($admin) {
                 $db = getDbConnection();
                 error_log("DIRECT-CUSTOMERS: Connected to database for DELETE request, customer ID: " . $customerId);
                 
-                // Check if customer exists
-                $stmt = $db->prepare("SELECT id FROM wp_charterhub_customers WHERE id = ?");
+                // Check if customer exists and is a client
+                $stmt = $db->prepare("SELECT id FROM wp_charterhub_users WHERE id = ? AND role = 'client'");
                 $stmt->execute([$customerId]);
                 
                 if (!$stmt->fetchColumn()) {
-                    throw new Exception('Customer not found', 404);
+                    throw new Exception('Customer not found or not a client', 404);
                 }
                 
-                // Delete the customer
-                $stmt = $db->prepare("DELETE FROM wp_charterhub_customers WHERE id = ?");
+                // Delete the customer (or set status to 'deleted' if you prefer not to delete records)
+                $stmt = $db->prepare("UPDATE wp_charterhub_users SET status = 'deleted' WHERE id = ? AND role = 'client'");
                 $stmt->execute([$customerId]);
                 
                 $response = ['deleted' => true, 'id' => $customerId];
-                error_log("DIRECT-CUSTOMERS: Customer deleted successfully: ID " . $customerId);
+                error_log("DIRECT-CUSTOMERS: Customer marked as deleted successfully: ID " . $customerId);
                 break;
                 
             default:
