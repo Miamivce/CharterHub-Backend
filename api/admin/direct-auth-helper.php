@@ -1,61 +1,103 @@
 <?php
 /**
- * Direct Authentication Helper
+ * Direct API Authentication Helper
  * 
- * Provides token validation and admin access control without relying on
- * external JWT libraries or middleware.
- * 
- * FOR DEVELOPMENT USE ONLY - NOT FOR PRODUCTION
+ * Contains helper functions for authentication with the direct API endpoints
  */
 
-// Enable CORS for local development
-if (!function_exists('apply_cors_headers')) {
-    function apply_cors_headers($allowed_methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']) {
-        // Define allowed origins
-        $allowed_origins = [
-            'http://localhost:3000',
-            'http://localhost:5173',
-            'http://localhost:8000',
-            'http://127.0.0.1:3000',
-            'http://127.0.0.1:5173',
-            'http://127.0.0.1:8000',
-            'https://charterhub.yachtstory.com',
-            'https://staging-charterhub.yachtstory.com'
-        ];
-        
-        // Get the origin from the request headers
-        $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
-        
-        // Check if origin is allowed
-        if (in_array($origin, $allowed_origins)) {
-            header("Access-Control-Allow-Origin: $origin");
-            header("Access-Control-Allow-Credentials: true");
-            header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-HTTP-Method-Override");
-            header("Access-Control-Allow-Methods: " . implode(', ', $allowed_methods));
-            header("Access-Control-Max-Age: 86400"); // 24 hours cache
-            
-            error_log("CORS headers applied for origin: $origin");
-        } else if (empty($origin)) {
-            // Default fallback if no origin is provided
-            header("Access-Control-Allow-Origin: http://localhost:3000");
-            header("Access-Control-Allow-Credentials: true");
-            header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-HTTP-Method-Override");
-            header("Access-Control-Allow-Methods: " . implode(', ', $allowed_methods));
-            header("Access-Control-Max-Age: 86400"); // 24 hours cache
-            error_log("CORS headers applied with default localhost:3000 (no origin provided)");
-        } else {
-            // Log unauthorized origin attempts
-            error_log("CORS request rejected from non-allowed origin: " . $origin);
-            // Don't set Access-Control-Allow-Origin header for non-allowed origins
-        }
-        
-        // Handle preflight OPTIONS request
-        if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-            http_response_code(200);
-            error_log("OPTIONS preflight request handled with 200 response");
-            exit;
-        }
+// Prevent direct access
+if (!defined('CHARTERHUB_LOADED')) {
+    define('CHARTERHUB_LOADED', true);
+    require_once 'admin-cors-helper.php';
+    exit('No direct script access allowed');
+}
+
+// Database connection
+function getDbConnection() {
+    require_once dirname(__DIR__, 2) . '/includes/config.php';
+    
+    try {
+        $db = new PDO(
+            "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4",
+            DB_USER,
+            DB_PASSWORD,
+            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+        );
+        return $db;
+    } catch (PDOException $e) {
+        error_log("Database connection error: " . $e->getMessage());
+        throw new Exception("Database connection failed", 500);
     }
+}
+
+// JWT Token Validation
+function validateAdminAccess() {
+    // Get the authorization header
+    $authHeader = isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : '';
+    
+    // Check if Bearer token is provided
+    if (empty($authHeader) || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
+        error_log("No valid authorization header found");
+        throw new Exception('Unauthorized access', 401);
+    }
+    
+    $token = $matches[1];
+    
+    // Get JWT secret from config
+    require_once dirname(__DIR__, 2) . '/includes/config.php';
+    
+    try {
+        // Validate the token (implement proper JWT validation)
+        // This is a simple placeholder - implement full JWT validation
+        $tokenParts = explode('.', $token);
+        if (count($tokenParts) !== 3) {
+            throw new Exception('Invalid token format', 401);
+        }
+        
+        // Decode payload
+        $payload = json_decode(base64_decode($tokenParts[1]), true);
+        
+        if (!$payload || !isset($payload['sub']) || !isset($payload['role'])) {
+            throw new Exception('Invalid token payload', 401);
+        }
+        
+        // Check if the user is an admin
+        if ($payload['role'] !== 'admin') {
+            throw new Exception('Unauthorized: admin role required', 403);
+        }
+        
+        // Get admin info from database
+        $db = getDbConnection();
+        $stmt = $db->prepare("SELECT id, email, username, role FROM users WHERE id = ? AND role = 'admin'");
+        $stmt->execute([$payload['sub']]);
+        $admin = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$admin) {
+            throw new Exception('Admin user not found', 401);
+        }
+        
+        return $admin;
+        
+    } catch (Exception $e) {
+        error_log("Token validation error: " . $e->getMessage());
+        throw new Exception('Authentication failed: ' . $e->getMessage(), 401);
+    }
+}
+
+// Input sanitization
+function sanitizeInput($input) {
+    if (is_array($input)) {
+        return array_map('sanitizeInput', $input);
+    }
+    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+}
+
+// Helper function to send JSON response and exit
+function sendJsonResponse($data, $statusCode = 200) {
+    http_response_code($statusCode);
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
 }
 
 // Common function to connect to the database
@@ -286,44 +328,29 @@ function handle_admin_request($callback) {
     $initial_ob_level = ob_get_level();
     
     try {
-        // 1. Include global CORS helper only if it's not already included
-        if (!function_exists('apply_cors_headers')) {
-            require_once __DIR__ . '/../../auth/global-cors.php';
-        }
-        
-        // 2. Handle CORS first - CRITICAL: Apply headers before any processing
+        // 1. Apply CORS headers first - CRITICAL: Apply headers before any processing
         $methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'];
-        $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
         
-        // Log request information for diagnostics
-        error_log("ADMIN REQUEST: Origin=" . $origin . ", Method=" . $_SERVER['REQUEST_METHOD']);
+        // Use the standardized admin CORS helper
+        apply_admin_cors_headers($methods);
         
-        // Apply CORS headers directly (avoiding any debug mode logic)
-        header("Access-Control-Allow-Origin: $origin");
-        header("Access-Control-Allow-Credentials: true");
-        header("Access-Control-Allow-Methods: " . implode(', ', $methods));
-        header("Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control, Pragma");
+        // Log detailed request information
+        log_admin_request_details();
         
-        if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-            header("Access-Control-Max-Age: 86400"); // 24 hours
-            http_response_code(200);
-            exit;
-        }
-        
-        // 3. Initialize response structure
+        // 2. Initialize response structure
         $response = [
             'success' => false,
             'message' => '',
             'data' => null
         ];
         
-        // 4. Perform authentication for non-OPTIONS requests
+        // 3. Perform authentication for non-OPTIONS requests
         $admin_user = ensure_admin_access();
         
-        // 5. Execute the endpoint-specific callback
+        // 4. Execute the endpoint-specific callback
         $result = $callback($admin_user);
         
-        // 6. Build success response
+        // 5. Build success response
         $response['success'] = true;
         $response['data'] = $result;
         
@@ -341,7 +368,7 @@ function handle_admin_request($callback) {
             ob_end_clean();
         }
         
-        // 7. Return JSON response
+        // 6. Return JSON response
         header('Content-Type: application/json');
         echo json_encode($response);
         exit;
