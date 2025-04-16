@@ -324,6 +324,21 @@ if (!function_exists('is_admin_user')) {
  * @return void
  */
 function handle_admin_request($callback) {
+    // Initialize response structure first to prevent undefined variable
+    $response = [
+        'success' => false,
+        'message' => '',
+        'data' => null
+    ];
+    
+    // Ensure we start with clean output buffering
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    // Start fresh output buffer to catch any unexpected output
+    ob_start();
+    
     // Track current output buffering level
     $initial_ob_level = ob_get_level();
     
@@ -338,13 +353,6 @@ function handle_admin_request($callback) {
         log_admin_request_details();
         
         error_log("DIRECT-AUTH: Starting admin request processing for " . $_SERVER['REQUEST_METHOD']);
-        
-        // 2. Initialize response structure
-        $response = [
-            'success' => false,
-            'message' => '',
-            'data' => null
-        ];
         
         try {
             // 3. Perform authentication for non-OPTIONS requests
@@ -377,17 +385,17 @@ function handle_admin_request($callback) {
         $response['message'] = $e->getMessage();
         $response['error'] = true;
         $response['code'] = $e->getCode() ?: 500;
-    } finally {
-        // Clean up output buffer to the original level
-        while (ob_get_level() > $initial_ob_level) {
-            ob_end_clean();
-        }
-        
-        // 6. Return JSON response
-        error_log("DIRECT-AUTH: Sending final response: " . ($response['success'] ? 'success' : 'error'));
-        header('Content-Type: application/json');
-        echo json_encode($response);
-        exit;
     }
+    
+    // Clean up output buffer to ensure no content has been sent
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    
+    // 6. Return JSON response
+    error_log("DIRECT-AUTH: Sending final response: " . ($response['success'] ? 'success' : 'error'));
+    header('Content-Type: application/json');
+    echo json_encode($response);
+    exit;
 }
 ?> 
