@@ -6,8 +6,49 @@
  * It includes handling for CORS and routing requests to the appropriate API endpoints.
  */
 
-// Set appropriate headers for CORS
-header('Access-Control-Allow-Origin: *');
+// Define allowed origins
+$allowed_origins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173', 
+    'http://localhost:8080',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:8080',
+    'https://charterhub.yachtstory.com',
+    'https://staging-charterhub.yachtstory.com',
+    'https://app.yachtstory.be',
+    'https://admin.yachtstory.be',
+    'https://www.admin.yachtstory.be',
+    'http://admin.yachtstory.be',
+    'https://yachtstory.be',
+    'https://www.yachtstory.be',
+    'https://charter-hub.vercel.app/'
+];
+
+// Get the origin from the request
+$origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+
+// Log request for debugging
+error_log("API Request: " . $_SERVER['REQUEST_METHOD'] . " " . $_SERVER['REQUEST_URI'] . " from origin: " . $origin);
+
+// Check if origin is allowed
+$isAllowed = in_array($origin, $allowed_origins);
+$isDev = strpos($origin, 'localhost') !== false || strpos($origin, '127.0.0.1') !== false;
+
+// Set CORS headers based on origin
+if ($isAllowed || $isDev) {
+    // Use specific origin, not wildcard, for credentials compatibility
+    header("Access-Control-Allow-Origin: $origin");
+    header('Access-Control-Allow-Credentials: true');
+} else {
+    // Use wildcard only for non-credential requests
+    header('Access-Control-Allow-Origin: *');
+    error_log("Unknown origin: $origin - using wildcard CORS");
+}
+
+// Set common CORS headers
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, Authorization');
 header('Access-Control-Max-Age: 3600');
@@ -24,6 +65,12 @@ header('Content-Type: application/json');
 // Get the requested URL path
 $request_uri = $_SERVER['REQUEST_URI'];
 $path = parse_url($request_uri, PHP_URL_PATH);
+
+// Special case for /customers endpoint for backward compatibility
+if ($path === '/customers') {
+    require_once __DIR__ . '/customers/index.php';
+    exit();
+}
 
 // Remove leading slash and break into components
 $path = ltrim($path, '/');
