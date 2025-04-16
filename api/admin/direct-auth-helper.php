@@ -276,58 +276,75 @@ if (!function_exists('is_admin_user')) {
 /**
  * Handle admin API request with proper CORS handling
  * 
- * This function provides standardized handling for admin API endpoints:
- * 1. Applies CORS headers before any authentication
- * 2. Handles preflight OPTIONS requests immediately
- * 3. Only performs authentication for non-OPTIONS requests
- * 4. Provides consistent error handling and response format
+ * This function safely handles CORS and authentication for admin endpoints
  * 
  * @param callable $callback Function that contains the endpoint-specific logic
  * @return void
  */
 function handle_admin_request($callback) {
-    // 1. Apply global CORS headers immediately with explicit support for all admin methods
-    apply_cors_headers(['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']);
-    
-    // 2. Handle preflight requests before authentication
-    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-        // Additional debugging for OPTIONS requests
-        error_log("Admin API: Handling OPTIONS preflight for " . ($_SERVER['HTTP_ORIGIN'] ?? 'unknown origin'));
-        error_log("Admin API: Request headers: " . json_encode(getallheaders()));
-        http_response_code(200);
-        exit;
-    }
-    
-    // 3. Initialize response structure
-    $response = [
-        'success' => false,
-        'message' => '',
-        'data' => null
-    ];
+    // Track current output buffering level
+    $initial_ob_level = ob_get_level();
     
     try {
-        // 4. Perform authentication only for non-OPTIONS requests
+        // 1. Include global CORS helper only if it's not already included
+        if (!function_exists('apply_cors_headers')) {
+            require_once __DIR__ . '/../../auth/global-cors.php';
+        }
+        
+        // 2. Handle CORS first - CRITICAL: Apply headers before any processing
+        $methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'];
+        $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
+        
+        // Log request information for diagnostics
+        error_log("ADMIN REQUEST: Origin=" . $origin . ", Method=" . $_SERVER['REQUEST_METHOD']);
+        
+        // Apply CORS headers directly (avoiding any debug mode logic)
+        header("Access-Control-Allow-Origin: $origin");
+        header("Access-Control-Allow-Credentials: true");
+        header("Access-Control-Allow-Methods: " . implode(', ', $methods));
+        header("Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control, Pragma");
+        
+        if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+            header("Access-Control-Max-Age: 86400"); // 24 hours
+            http_response_code(200);
+            exit;
+        }
+        
+        // 3. Initialize response structure
+        $response = [
+            'success' => false,
+            'message' => '',
+            'data' => null
+        ];
+        
+        // 4. Perform authentication for non-OPTIONS requests
         $admin_user = ensure_admin_access();
         
-        // 5. Execute endpoint-specific callback
+        // 5. Execute the endpoint-specific callback
         $result = $callback($admin_user);
         
-        // 6. Set success response
+        // 6. Build success response
         $response['success'] = true;
         $response['data'] = $result;
         
     } catch (Exception $e) {
-        // Handle exceptions
+        // Log any exceptions
+        error_log("ADMIN API Exception: " . $e->getMessage());
+        
+        // Build error response
+        $response['success'] = false;
         $response['message'] = $e->getMessage();
         $response['error'] = true;
+    } finally {
+        // Clean up output buffer to the original level
+        while (ob_get_level() > $initial_ob_level) {
+            ob_end_clean();
+        }
         
-        // Log the error
-        error_log("Admin API exception: " . $e->getMessage());
+        // 7. Return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($response);
+        exit;
     }
-    
-    // 7. Return JSON response
-    header('Content-Type: application/json');
-    echo json_encode($response);
-    exit;
 }
 ?> 
