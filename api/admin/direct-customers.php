@@ -14,8 +14,67 @@
 // Include auth helper
 require_once __DIR__ . '/direct-auth-helper.php';
 
-// Enable CORS - Must be called before any output or processing
-apply_cors_headers();
+// Start output buffering to prevent headers issues
+if (!ob_get_level()) {
+    ob_start();
+}
+
+// Improved CORS handling - Record incoming request details for better debugging
+$incoming_origin = $_SERVER['HTTP_ORIGIN'] ?? 'none';
+$incoming_method = $_SERVER['REQUEST_METHOD'] ?? 'unknown';
+error_log("DIRECT-CUSTOMERS.PHP - Request received from origin: {$incoming_origin}, method: {$incoming_method}");
+
+try {
+    // Check if this is a direct debug or test request or credentials mode
+    if (isset($_GET['debug']) || (isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'Mozilla') !== false)) {
+        // For debug and browser requests with credentials
+        if ($incoming_origin !== 'none') {
+            header("Access-Control-Allow-Origin: $incoming_origin");
+            header("Access-Control-Allow-Credentials: true");
+        } else {
+            // Only use wildcard when no specific origin is provided
+            header('Access-Control-Allow-Origin: *');
+        }
+        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control, Pragma, Expires');
+        error_log("DIRECT-CUSTOMERS.PHP - Debug/Test mode: Setting CORS headers for origin: {$incoming_origin}");
+    } else {
+        // Normal API operation with strict CORS
+        $cors_result = apply_cors_headers(['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']);
+        if (!$cors_result) {
+            error_log("DIRECT-CUSTOMERS.PHP - CORS check failed for origin: {$incoming_origin}");
+            ob_clean();
+            header('Content-Type: application/json');
+            echo json_encode([
+                'success' => false,
+                'message' => 'CORS error: Origin not allowed',
+                'error' => 'cors_error',
+                'origin' => $incoming_origin
+            ]);
+            exit;
+        }
+    }
+} catch (Exception $cors_e) {
+    error_log("DIRECT-CUSTOMERS.PHP - CORS exception: " . $cors_e->getMessage());
+    ob_clean();
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => false,
+        'message' => 'CORS error: ' . $cors_e->getMessage(),
+        'error' => 'cors_exception'
+    ]);
+    exit;
+}
+
+// Handle OPTIONS preflight immediately
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    ob_clean();
+    echo json_encode(['success' => true, 'message' => 'CORS preflight successful']);
+    exit;
+}
+
+// Set content type
+header('Content-Type: application/json');
 
 // Initialize response
 $response = [
