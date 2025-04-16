@@ -2,85 +2,83 @@
 /**
  * Admin CORS Helper
  * 
- * Provides CORS handling functions for admin API endpoints
- * Centralizes CORS configuration for consistency across all admin endpoints
+ * Helper functions for handling CORS for admin API endpoints
  */
 
 // Prevent direct access
-if (!defined('CHARTERHUB_LOADED')) {
-    define('CHARTERHUB_LOADED', true);
-    exit('No direct script access allowed');
-}
+defined('CHARTERHUB_LOADED') or die('No direct access allowed');
 
-// Apply CORS headers for admin endpoints
+/**
+ * Apply CORS headers for admin API endpoints
+ * 
+ * @param array $allowed_methods The HTTP methods to allow
+ * @return void
+ */
 function apply_admin_cors_headers($allowed_methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']) {
     // Define allowed origins
     $allowed_origins = [
         'http://localhost:3000',
-        'http://localhost:5173', 
-        'http://localhost:8000',
+        'http://localhost:3001', 
+        'http://localhost:5173',
+        'http://localhost:8080',
         'http://127.0.0.1:3000',
+        'http://127.0.0.1:3001',
         'http://127.0.0.1:5173',
-        'http://127.0.0.1:8000',
+        'http://127.0.0.1:8080',
+        'https://charterhub.app',
+        'https://staging.charterhub.app',
+        'https://dev.charterhub.app',
         'https://charterhub.yachtstory.com',
         'https://staging-charterhub.yachtstory.com',
+        'https://app.yachtstory.be',
         'https://admin.yachtstory.be',
         'https://www.admin.yachtstory.be',
         'http://admin.yachtstory.be',
-        'https://app.yachtstory.be'
+        'https://yachtstory.be',
+        'https://www.yachtstory.be',
+        'https://charter-hub.vercel.app/'
     ];
     
-    // Get the origin from the request headers
+    // Get the origin from the request
     $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
     
-    // Log request details for debugging
-    $request_method = $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN';
-    error_log("Admin API Request: $request_method from origin: $origin");
+    // Log CORS origins for debugging
+    error_log("CORS allowed origins: " . implode(', ', $allowed_origins));
+    error_log("CORS request from origin: $origin");
+    error_log("CORS check: Origin=$origin, isDev=" . (strpos($origin, 'localhost') !== false ? '1' : '') . ", isAllowed=" . (in_array($origin, $allowed_origins) ? '1' : '0'));
     
-    // Check if origin is allowed
+    // Set CORS headers
     if (in_array($origin, $allowed_origins)) {
         header("Access-Control-Allow-Origin: $origin");
         header("Access-Control-Allow-Credentials: true");
-        header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-HTTP-Method-Override");
         header("Access-Control-Allow-Methods: " . implode(', ', $allowed_methods));
-        header("Access-Control-Max-Age: 86400"); // 24 hours cache
-        
-        error_log("CORS headers applied for origin: $origin");
-    } else if (empty($origin)) {
-        // Default fallback if no origin is provided
-        header("Access-Control-Allow-Origin: http://localhost:3000");
-        header("Access-Control-Allow-Credentials: true");
-        header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-HTTP-Method-Override");
-        header("Access-Control-Allow-Methods: " . implode(', ', $allowed_methods));
-        header("Access-Control-Max-Age: 86400"); // 24 hours cache
-        error_log("CORS headers applied with default localhost:3000 (no origin provided)");
-    } else {
-        // Log unauthorized origin attempts
-        error_log("CORS request rejected from non-allowed origin: " . $origin);
-        // Don't set Access-Control-Allow-Origin header for non-allowed origins
+        header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+        header("Access-Control-Max-Age: 86400"); // Cache preflight for 24 hours
     }
     
-    // Handle preflight OPTIONS request
+    // Handle preflight OPTIONS request and exit
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-        http_response_code(200);
-        error_log("OPTIONS preflight request handled with 200 response");
-        exit;
+        exit(0);
     }
 }
 
-// Helper function to log request details
-function log_admin_request_details() {
-    $method = $_SERVER['REQUEST_METHOD'] ?? 'UNKNOWN';
-    $path = $_SERVER['REQUEST_URI'] ?? 'UNKNOWN';
-    $origin = $_SERVER['HTTP_ORIGIN'] ?? 'UNKNOWN';
-    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'UNKNOWN';
+/**
+ * Log detailed information about the request for debugging
+ * 
+ * @return void
+ */
+function log_request_details() {
+    error_log("Admin API Request: " . $_SERVER['REQUEST_METHOD'] . " " . $_SERVER['REQUEST_URI']);
+    error_log("Origin: " . (isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : 'none'));
+    error_log("User-Agent: " . (isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : 'none'));
+    error_log("Request Headers: " . json_encode(getallheaders()));
     
-    error_log("Admin API Request: $method $path from $origin | User-Agent: $userAgent");
-    
-    // Log content type for non-GET requests
-    if ($method !== 'GET') {
-        $contentType = $_SERVER['CONTENT_TYPE'] ?? 'UNKNOWN';
-        error_log("Request Content-Type: $contentType");
+    // Log request body for non-GET requests
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
+        $input = file_get_contents('php://input');
+        if (!empty($input)) {
+            error_log("Request Body: " . $input);
+        }
     }
 }
 ?> 
