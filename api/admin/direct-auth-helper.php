@@ -224,47 +224,18 @@ function sendJsonResponse($success, $message, $data = null, $statusCode = 200) {
 
 // Database connection
 function get_database_connection() {
-    // Try to use the same database config as the rest of the application
-    $possible_config_paths = [
-        __DIR__ . '/../../config/db.php',
-        __DIR__ . '/../../../config/db.php',
-        __DIR__ . '/../../../../config/db.php',
-    ];
+    // Use environment variables with production fallbacks, matching client endpoints
+    $db_host = getenv('DB_HOST') ?: 'mysql-charterhub-charterhub.c.aivencloud.com';
+    $db_port = getenv('DB_PORT') ?: '19174';
+    $db_name = getenv('DB_NAME') ?: 'defaultdb';
+    $db_user = getenv('DB_USER') ?: 'avnadmin';
+    $db_pass = getenv('DB_PASSWORD') ?: 'AVNS_HCZbm5bZJE1L9C8Pz8C';
     
-    $db_config = null;
-    foreach ($possible_config_paths as $path) {
-        if (file_exists($path)) {
-            // Include the config file to get the variables
-            include($path);
-            if (isset($db_host) && isset($db_name) && isset($db_user)) {
-                $db_config = [
-                    'host' => $db_host,
-                    'name' => $db_name,
-                    'user' => $db_user,
-                    'pass' => isset($db_pass) ? $db_pass : ''
-                ];
-                break;
-            }
-        }
-    }
-    
-    // If no config file found, use these hardcoded defaults
-    if (!$db_config) {
-        $db_config = [
-            'host' => 'localhost',
-            'name' => 'charterhub_local',
-            'user' => 'root',
-            'pass' => ''
-        ];
-    }
+    error_log("DIRECT-AUTH: Connecting to database host: $db_host, database: $db_name");
     
     try {
-        $conn = new mysqli(
-            $db_config['host'], 
-            $db_config['user'], 
-            $db_config['pass'], 
-            $db_config['name']
-        );
+        // Create connection with port parameter for cloud database
+        $conn = new mysqli($db_host, $db_user, $db_pass, $db_name, $db_port);
         
         if ($conn->connect_error) {
             error_log("Database connection failed: " . $conn->connect_error);
@@ -273,9 +244,9 @@ function get_database_connection() {
                 'success' => false,
                 'message' => 'Database connection failed: ' . $conn->connect_error,
                 'attempted_config' => [
-                    'host' => $db_config['host'],
-                    'name' => $db_config['name'],
-                    'user' => $db_config['user']
+                    'host' => $db_host,
+                    'name' => $db_name,
+                    'user' => $db_user
                 ]
             ]);
             exit;
@@ -289,9 +260,9 @@ function get_database_connection() {
             'success' => false,
             'message' => 'Database connection exception: ' . $e->getMessage(),
             'attempted_config' => [
-                'host' => $db_config['host'],
-                'name' => $db_config['name'],
-                'user' => $db_config['user']
+                'host' => $db_host,
+                'name' => $db_name,
+                'user' => $db_user
             ]
         ]);
         exit;
