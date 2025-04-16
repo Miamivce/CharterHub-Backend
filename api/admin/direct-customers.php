@@ -6,118 +6,47 @@
  * external JWT libraries or middleware.
  * 
  * Supports:
- * - GET: List all customers/clients
- * 
- * FOR DEVELOPMENT USE ONLY - NOT FOR PRODUCTION
+ * - GET: List all customers/clients or get a single customer by ID
+ * - POST: Create or update a customer
+ * - DELETE: Delete a customer
  */
+
+// Define CHARTERHUB_LOADED constant for included files
+define('CHARTERHUB_LOADED', true);
 
 // Include auth helper
 require_once __DIR__ . '/direct-auth-helper.php';
 
-// Start output buffering to prevent headers issues
-if (!ob_get_level()) {
-    ob_start();
-}
-
-// Improved CORS handling - Record incoming request details for better debugging
-$incoming_origin = $_SERVER['HTTP_ORIGIN'] ?? 'none';
-$incoming_method = $_SERVER['REQUEST_METHOD'] ?? 'unknown';
-error_log("DIRECT-CUSTOMERS.PHP - Request received from origin: {$incoming_origin}, method: {$incoming_method}");
-
-try {
-    // Check if this is a direct debug or test request or credentials mode
-    if (isset($_GET['debug']) || (isset($_SERVER['HTTP_USER_AGENT']) && strpos($_SERVER['HTTP_USER_AGENT'], 'Mozilla') !== false)) {
-        // For debug and browser requests with credentials
-        if ($incoming_origin !== 'none') {
-            header("Access-Control-Allow-Origin: $incoming_origin");
-            header("Access-Control-Allow-Credentials: true");
-        } else {
-            // Only use wildcard when no specific origin is provided
-            header('Access-Control-Allow-Origin: *');
-        }
-        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-        header('Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control, Pragma, Expires');
-        error_log("DIRECT-CUSTOMERS.PHP - Debug/Test mode: Setting CORS headers for origin: {$incoming_origin}");
-    } else {
-        // Normal API operation with strict CORS
-        $cors_result = apply_cors_headers(['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']);
-        if (!$cors_result) {
-            error_log("DIRECT-CUSTOMERS.PHP - CORS check failed for origin: {$incoming_origin}");
-            ob_clean();
-            header('Content-Type: application/json');
-            echo json_encode([
-                'success' => false,
-                'message' => 'CORS error: Origin not allowed',
-                'error' => 'cors_error',
-                'origin' => $incoming_origin
-            ]);
-            exit;
+// Use the admin request handler for CORS and authentication
+handle_admin_request(function($admin_user) {
+    // Check for X-HTTP-Method-Override header
+    $method = $_SERVER['REQUEST_METHOD'];
+    if ($method === 'POST' && isset($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
+        $override = strtoupper($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE']);
+        if (in_array($override, ['PUT', 'DELETE'])) {
+            error_log("Using method override: $override instead of POST");
+            $method = $override;
         }
     }
-} catch (Exception $cors_e) {
-    error_log("DIRECT-CUSTOMERS.PHP - CORS exception: " . $cors_e->getMessage());
-    ob_clean();
-    header('Content-Type: application/json');
-    echo json_encode([
-        'success' => false,
-        'message' => 'CORS error: ' . $cors_e->getMessage(),
-        'error' => 'cors_exception'
-    ]);
-    exit;
-}
-
-// Handle OPTIONS preflight immediately
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    ob_clean();
-    echo json_encode(['success' => true, 'message' => 'CORS preflight successful']);
-    exit;
-}
-
-// Set content type
-header('Content-Type: application/json');
-
-// Initialize response
-$response = [
-    'success' => false,
-    'message' => 'Initializing request',
-];
-
-// Ensure admin access
-ensure_admin_access();
-
-// Check for X-HTTP-Method-Override header
-$method = $_SERVER['REQUEST_METHOD'];
-if ($method === 'POST' && isset($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'])) {
-    $override = strtoupper($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE']);
-    if (in_array($override, ['PUT', 'DELETE'])) {
-        error_log("Using method override: $override instead of POST");
-        $method = $override;
+    
+    // Handle different HTTP methods
+    switch ($method) {
+        case 'GET':
+            return handle_get_request();
+        case 'POST':
+        case 'PUT':
+            return handle_post_request();
+        case 'DELETE':
+            return handle_delete_request();
+        default:
+            throw new Exception('Method not allowed');
     }
-}
-
-// Handle different HTTP methods
-switch ($method) {
-    case 'GET':
-        handle_get_request();
-        break;
-    case 'POST':
-        handle_post_request();
-        break;
-    case 'PUT':
-        handle_post_request(); // Reuse the post handler for PUT
-        break;
-    case 'DELETE':
-        handle_delete_request();
-        break;
-    default:
-        json_response([
-            'success' => false,
-            'message' => 'Method not allowed'
-        ], 405);
-}
+});
 
 /**
  * Handle GET request - List all customers (clients) or a single customer by ID
+ * 
+ * @return array Results of the operation
  */
 function handle_get_request() {
     $conn = get_database_connection();
@@ -155,10 +84,10 @@ function handle_get_request() {
             $stmt->close();
             $conn->close();
             
-            json_response([
+            return [
                 'success' => false,
-                'message' => 'Customer not found',
-            ], 404);
+                'message' => 'Customer not found'
+            ];
         }
         
         // Fetch the customer data
@@ -184,11 +113,10 @@ function handle_get_request() {
         $conn->close();
         
         // Return the single customer
-        json_response([
-            'success' => true,
+        return [
             'message' => 'Customer retrieved successfully',
             'customer' => $customer
-        ]);
+        ];
     } else {
         // Original logic for fetching all customers
         $query = "SELECT 
@@ -241,55 +169,213 @@ function handle_get_request() {
         $conn->close();
         
         // Return customers
-        json_response([
-            'success' => true,
+        return [
             'message' => 'Customers retrieved successfully',
             'customers' => $customers,
             'meta' => [
                 'total' => count($customers)
             ]
-        ]);
+        ];
     }
 }
 
 /**
  * Handle POST request - Create or update a customer
+ * 
+ * @return array Results of the operation
  */
 function handle_post_request() {
+    // Get database connection
+    $conn = get_database_connection();
+    
     // Read and decode request body
     $input_raw = file_get_contents('php://input');
-    error_log("Received create/update customer request body: " . $input_raw);
-    
     $input = json_decode($input_raw, true);
     
     if (!$input) {
-        error_log("Failed to parse JSON request body");
-        json_response([
+        return [
             'success' => false,
             'message' => 'Invalid request body - unable to parse JSON'
-        ], 400);
+        ];
     }
-    
-    error_log("Parsed create/update customer request data: " . print_r($input, true));
-    
-    $conn = get_database_connection();
     
     // Check if this is an update (ID provided) or create
     $is_update = isset($input['id']) && !empty($input['id']);
-    error_log("Customer operation: " . ($is_update ? "UPDATE customer ID {$input['id']}" : "CREATE new customer"));
     
-    // Validate required fields
-    if (!$is_update) {
-        // For new customer, email and password are required
-        if (empty($input['email']) || empty($input['password'])) {
-            error_log("Missing required fields for new customer: " . 
-                      (empty($input['email']) ? "email " : "") . 
-                      (empty($input['password']) ? "password" : ""));
+    if ($is_update) {
+        // UPDATE EXISTING CUSTOMER
+        $user_id = intval($input['id']);
+        
+        // Build update query based on provided fields
+        $update_fields = [];
+        $params = [];
+        $types = "";
+        
+        // Map input fields to database fields
+        $field_mappings = [
+            'email' => 'email',
+            'firstName' => 'first_name',
+            'lastName' => 'last_name',
+            'phone' => 'phone_number',
+            'company' => 'company',
+            'country' => 'country',
+            'address' => 'address',
+            'notes' => 'notes'
+        ];
+        
+        // Add display_name calculation
+        $has_name_fields = false;
+        
+        foreach ($field_mappings as $input_field => $db_field) {
+            if (isset($input[$input_field])) {
+                $update_fields[] = "$db_field = ?";
+                $params[] = $input[$input_field];
+                $types .= "s";
+                
+                if ($input_field === 'firstName' || $input_field === 'lastName') {
+                    $has_name_fields = true;
+                }
+            }
+        }
+        
+        // If first_name or last_name was updated, update display_name
+        if ($has_name_fields) {
+            // Get current values for any name field not being updated
+            $stmt = $conn->prepare("SELECT first_name, last_name FROM wp_charterhub_users WHERE id = ?");
+            $stmt->bind_param("i", $user_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $current_user = $result->fetch_assoc();
+            $stmt->close();
             
-            json_response([
+            $first_name = isset($input['firstName']) ? $input['firstName'] : $current_user['first_name'];
+            $last_name = isset($input['lastName']) ? $input['lastName'] : $current_user['last_name'];
+            
+            // Generate display name
+            $display_name = trim("$first_name $last_name");
+            if (!empty($display_name)) {
+                $update_fields[] = "display_name = ?";
+                $params[] = $display_name;
+                $types .= "s";
+            }
+        }
+        
+        if (empty($update_fields)) {
+            return [
                 'success' => false,
-                'message' => 'Email and password are required for new customers'
-            ], 400);
+                'message' => 'No fields provided for update'
+            ];
+        }
+        
+        // Add the ID parameter
+        $params[] = $user_id;
+        $types .= "i";
+        
+        // Execute update
+        $update_query = "UPDATE wp_charterhub_users SET " . implode(", ", $update_fields) . " WHERE id = ? AND role = 'client'";
+        $stmt = $conn->prepare($update_query);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        
+        if ($stmt->affected_rows === 0 && $stmt->errno === 0) {
+            // No rows were updated, but no error occurred (might be updating with the same values)
+            $stmt->close();
+            
+            // Get the current user data to return
+            $get_stmt = $conn->prepare("SELECT id, email, username, first_name, last_name, phone_number, company, country, address, notes, role, verified FROM wp_charterhub_users WHERE id = ? AND role = 'client'");
+            $get_stmt->bind_param("i", $user_id);
+            $get_stmt->execute();
+            $result = $get_stmt->get_result();
+            
+            if ($result->num_rows === 0) {
+                $get_stmt->close();
+                $conn->close();
+                return [
+                    'success' => false,
+                    'message' => 'Customer not found'
+                ];
+            }
+            
+            $user = $result->fetch_assoc();
+            $get_stmt->close();
+            $conn->close();
+            
+            return [
+                'message' => 'No changes made to customer',
+                'customer' => [
+                    'id' => (int)$user['id'],
+                    'email' => $user['email'],
+                    'username' => $user['username'] ?? '',
+                    'firstName' => $user['first_name'] ?? '',
+                    'lastName' => $user['last_name'] ?? '',
+                    'phone' => $user['phone_number'] ?? '',
+                    'company' => $user['company'] ?? '',
+                    'country' => $user['country'] ?? '',
+                    'address' => $user['address'] ?? '',
+                    'notes' => $user['notes'] ?? '',
+                    'role' => $user['role'],
+                    'verified' => (bool)$user['verified']
+                ]
+            ];
+        } else if ($stmt->errno !== 0) {
+            // An error occurred
+            $error = $stmt->error;
+            $stmt->close();
+            $conn->close();
+            
+            return [
+                'success' => false,
+                'message' => 'Database error: ' . $error
+            ];
+        }
+        
+        $stmt->close();
+        
+        // Get the updated user data
+        $get_stmt = $conn->prepare("SELECT id, email, username, first_name, last_name, phone_number, company, country, address, notes, role, verified FROM wp_charterhub_users WHERE id = ? AND role = 'client'");
+        $get_stmt->bind_param("i", $user_id);
+        $get_stmt->execute();
+        $result = $get_stmt->get_result();
+        
+        if ($result->num_rows === 0) {
+            $get_stmt->close();
+            $conn->close();
+            
+            return [
+                'success' => false,
+                'message' => 'Customer updated but failed to retrieve updated data'
+            ];
+        }
+        
+        $user = $result->fetch_assoc();
+        $get_stmt->close();
+        $conn->close();
+        
+        return [
+            'message' => 'Customer updated successfully',
+            'customer' => [
+                'id' => (int)$user['id'],
+                'email' => $user['email'],
+                'username' => $user['username'] ?? '',
+                'firstName' => $user['first_name'] ?? '',
+                'lastName' => $user['last_name'] ?? '',
+                'phone' => $user['phone_number'] ?? '',
+                'company' => $user['company'] ?? '',
+                'country' => $user['country'] ?? '',
+                'address' => $user['address'] ?? '',
+                'notes' => $user['notes'] ?? '',
+                'role' => $user['role'],
+                'verified' => (bool)$user['verified']
+            ]
+        ];
+    } else {
+        // CREATE NEW CUSTOMER
+        // For new customers, email is required
+        if (empty($input['email'])) {
+            return [
+                'success' => false,
+                'message' => 'Email is required for new customers'
+            ];
         }
         
         // Check if email exists
@@ -300,324 +386,142 @@ function handle_post_request() {
         
         if ($result->num_rows > 0) {
             $stmt->close();
-            error_log("Customer creation failed - email already exists: {$input['email']}");
-            json_response([
+            $conn->close();
+            
+            return [
                 'success' => false,
                 'message' => 'Email already exists'
-            ], 400);
+            ];
         }
         $stmt->close();
-    }
-    
-    // Ensure role is client
-    $role = 'client';
-    
-    if ($is_update) {
-        // Update existing customer
-        $update_fields = [];
-        $params = [];
-        $types = "";
         
-        // Only update fields that are provided
-        // Removing email update capability for admins - email field cannot be modified
-        // if (isset($input['email'])) {
-        //     $update_fields[] = "email = ?";
-        //     $params[] = sanitize_input($input['email']);
-        //     $types .= "s";
-        // }
+        // Set defaults for optional fields
+        $first_name = isset($input['firstName']) ? $input['firstName'] : '';
+        $last_name = isset($input['lastName']) ? $input['lastName'] : '';
+        $phone = isset($input['phone']) ? $input['phone'] : '';
+        $company = isset($input['company']) ? $input['company'] : '';
+        $country = isset($input['country']) ? $input['country'] : '';
+        $address = isset($input['address']) ? $input['address'] : '';
+        $notes = isset($input['notes']) ? $input['notes'] : '';
         
-        if (isset($input['username'])) {
-            $update_fields[] = "username = ?";
-            $params[] = sanitize_input($input['username']);
-            $types .= "s";
+        // Generate display name
+        $display_name = trim("$first_name $last_name");
+        if (empty($display_name)) {
+            $display_name = $input['email'];
         }
         
-        if (isset($input['firstName'])) {
-            $update_fields[] = "first_name = ?";
-            $params[] = sanitize_input($input['firstName']);
-            $types .= "s";
-        }
+        // Insert new customer
+        $stmt = $conn->prepare("
+            INSERT INTO wp_charterhub_users 
+            (email, username, display_name, first_name, last_name, phone_number, company, country, address, notes, role, verified) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'client', 1)
+        ");
         
-        if (isset($input['lastName'])) {
-            $update_fields[] = "last_name = ?";
-            $params[] = sanitize_input($input['lastName']);
-            $types .= "s";
-        }
+        $username = $input['email']; // Use email as username
         
-        // Calculate display_name if first or last name was updated
-        if (isset($input['firstName']) || isset($input['lastName'])) {
-            // Get current user data to create display name with new + existing name components
-            $stmt = $conn->prepare("SELECT first_name, last_name FROM wp_charterhub_users WHERE id = ?");
-            $stmt->bind_param("i", $input['id']);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            $current_user = $result->fetch_assoc();
-            $stmt->close();
-            
-            $first = isset($input['firstName']) ? $input['firstName'] : $current_user['first_name'];
-            $last = isset($input['lastName']) ? $input['lastName'] : $current_user['last_name'];
-            
-            // Update display_name based on new name values
-            $display_name = trim($first . ' ' . $last);
-            if (!empty($display_name)) {
-                $update_fields[] = "display_name = ?";
-                $params[] = $display_name;
-                $types .= "s";
-            }
-        }
+        $stmt->bind_param(
+            "ssssssssss", 
+            $input['email'], 
+            $username, 
+            $display_name, 
+            $first_name, 
+            $last_name, 
+            $phone, 
+            $company,
+            $country,
+            $address,
+            $notes
+        );
         
-        if (isset($input['display_name'])) {
-            $update_fields[] = "display_name = ?";
-            $params[] = sanitize_input($input['display_name']);
-            $types .= "s";
-        }
-        
-        if (isset($input['phone'])) {
-            $update_fields[] = "phone_number = ?";
-            $params[] = sanitize_input($input['phone']);
-            $types .= "s";
-        }
-        
-        if (isset($input['company'])) {
-            $update_fields[] = "company = ?";
-            $params[] = sanitize_input($input['company']);
-            $types .= "s";
-        }
-        
-        if (isset($input['country'])) {
-            $update_fields[] = "country = ?";
-            $params[] = sanitize_input($input['country']);
-            $types .= "s";
-        }
-        
-        if (isset($input['address'])) {
-            $update_fields[] = "address = ?";
-            $params[] = sanitize_input($input['address']);
-            $types .= "s";
-        }
-        
-        if (isset($input['notes'])) {
-            $update_fields[] = "notes = ?";
-            $params[] = sanitize_input($input['notes']);
-            $types .= "s";
-        }
-        
-        if (isset($input['password']) && !empty($input['password'])) {
-            $update_fields[] = "password = ?";
-            $hashed_password = password_hash($input['password'], PASSWORD_DEFAULT);
-            $params[] = $hashed_password;
-            $types .= "s";
-        }
-        
-        // Always set role to client
-        $update_fields[] = "role = ?";
-        $params[] = $role;
-        $types .= "s";
-        
-        // Add ID to params
-        $params[] = $input['id'];
-        $types .= "i";
-        
-        if (count($update_fields) > 0) {
-            $query = "UPDATE wp_charterhub_users SET " . implode(", ", $update_fields) . " WHERE id = ?";
-            $stmt = $conn->prepare($query);
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-            
-            if ($stmt->affected_rows === 0) {
-                $stmt->close();
-                json_response([
-                    'success' => false,
-                    'message' => 'Customer not found or no changes made'
-                ], 404);
-            }
-            
-            $stmt->close();
-        }
-        
-        // Get updated customer
-        $stmt = $conn->prepare("SELECT id, email, username, first_name, last_name, phone_number, company, country, address, role, verified, created_at, notes 
-                              FROM wp_charterhub_users WHERE id = ?");
-        $stmt->bind_param("i", $input['id']);
         $stmt->execute();
-        $result = $stmt->get_result();
+        
+        if ($stmt->affected_rows === 0) {
+            $error = $stmt->error;
+            $stmt->close();
+            $conn->close();
+            
+            return [
+                'success' => false,
+                'message' => 'Failed to create customer: ' . $error
+            ];
+        }
+        
+        $new_id = $stmt->insert_id;
+        $stmt->close();
+        
+        // Get the newly created customer
+        $get_stmt = $conn->prepare("SELECT id, email, username, first_name, last_name, phone_number, company, country, address, notes, role, verified FROM wp_charterhub_users WHERE id = ?");
+        $get_stmt->bind_param("i", $new_id);
+        $get_stmt->execute();
+        $result = $get_stmt->get_result();
         
         if ($result->num_rows === 0) {
-            $stmt->close();
-            json_response([
+            $get_stmt->close();
+            $conn->close();
+            
+            return [
                 'success' => false,
-                'message' => 'Failed to retrieve updated customer'
-            ], 500);
+                'message' => 'Customer created but failed to retrieve data'
+            ];
         }
         
-        $customer = $result->fetch_assoc();
-        $stmt->close();
+        $user = $result->fetch_assoc();
+        $get_stmt->close();
+        $conn->close();
         
-        json_response([
-            'success' => true,
-            'message' => 'Customer updated successfully',
+        return [
+            'message' => 'Customer created successfully',
             'customer' => [
-                'id' => (int)$customer['id'],
-                'email' => $customer['email'],
-                'username' => $customer['username'] ?? '',
-                'firstName' => $customer['first_name'] ?? '',
-                'lastName' => $customer['last_name'] ?? '',
-                'phone' => $customer['phone_number'] ?? '',
-                'company' => $customer['company'] ?? '',
-                'country' => $customer['country'] ?? '',
-                'address' => $customer['address'] ?? '',
-                'notes' => $customer['notes'] ?? '',
-                'role' => $customer['role'],
-                'verified' => (bool)$customer['verified'],
-                'createdAt' => $customer['created_at'],
-                'selfRegistered' => false
+                'id' => (int)$user['id'],
+                'email' => $user['email'],
+                'username' => $user['username'] ?? '',
+                'firstName' => $user['first_name'] ?? '',
+                'lastName' => $user['last_name'] ?? '',
+                'phone' => $user['phone_number'] ?? '',
+                'company' => $user['company'] ?? '',
+                'country' => $user['country'] ?? '',
+                'address' => $user['address'] ?? '',
+                'notes' => $user['notes'] ?? '',
+                'role' => $user['role'],
+                'verified' => (bool)$user['verified']
             ]
-        ]);
-    } else {
-        // Create new customer
-        $email = sanitize_input($input['email']);
-        $password = password_hash($input['password'], PASSWORD_DEFAULT);
-        $username = isset($input['username']) ? sanitize_input($input['username']) : '';
-        $first_name = isset($input['firstName']) ? sanitize_input($input['firstName']) : '';
-        $last_name = isset($input['lastName']) ? sanitize_input($input['lastName']) : '';
-        $phone = isset($input['phone']) ? sanitize_input($input['phone']) : '';
-        $company = isset($input['company']) ? sanitize_input($input['company']) : '';
-        $country = isset($input['country']) ? sanitize_input($input['country']) : '';
-        $address = isset($input['address']) ? sanitize_input($input['address']) : '';
-        $notes = isset($input['notes']) ? sanitize_input($input['notes']) : '';
-        $verified = isset($input['verified']) ? (int)$input['verified'] : 1;
-        
-        // Create display name from first and last name if not provided
-        $display_name = isset($input['display_name']) ? sanitize_input($input['display_name']) : 
-                        trim($first_name . ' ' . $last_name);
-        
-        // If display_name is still empty, use email as fallback
-        if (empty(trim($display_name))) {
-            $display_name = $email;
-        }
-        
-        // Debugging values
-        error_log("Creating new customer with data:");
-        error_log("Email: $email");
-        error_log("Username: $username");
-        error_log("First Name: $first_name");
-        error_log("Last Name: $last_name");
-        error_log("Display Name: $display_name");
-        error_log("Phone: $phone");
-        error_log("Company: $company");
-        error_log("Country: $country");
-        error_log("Address: $address");
-        error_log("Role: $role");
-        error_log("Verified: $verified");
-        
-        // Prepare the query - now including display_name
-        $insert_query = "INSERT INTO wp_charterhub_users 
-                        (email, password, username, first_name, last_name, display_name, phone_number, company, country, address, notes, role, verified, created_at) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
-        
-        try {
-            $stmt = $conn->prepare($insert_query);
-            
-            if (!$stmt) {
-                error_log("Failed to prepare insert statement: " . $conn->error);
-                json_response([
-                    'success' => false,
-                    'message' => 'Database error: Failed to prepare statement - ' . $conn->error
-                ], 500);
-            }
-            
-            $stmt->bind_param("ssssssssssssi", $email, $password, $username, $first_name, $last_name, $display_name, $phone, $company, $country, $address, $notes, $role, $verified);
-            $result = $stmt->execute();
-            
-            if (!$result) {
-                error_log("Failed to execute insert statement: " . $stmt->error);
-                $stmt->close();
-                json_response([
-                    'success' => false,
-                    'message' => 'Database error: Failed to create customer - ' . $stmt->error
-                ], 500);
-            }
-            
-            if ($stmt->affected_rows === 0) {
-                $stmt->close();
-                error_log("No rows affected by insert statement");
-                json_response([
-                    'success' => false,
-                    'message' => 'Failed to create customer: No rows inserted'
-                ], 500);
-            }
-            
-            $customer_id = $stmt->insert_id;
-            $stmt->close();
-            
-            error_log("Successfully created customer with ID: $customer_id");
-            
-            // Get created customer
-            $stmt = $conn->prepare("SELECT id, email, username, first_name, last_name, phone_number, company, country, address, role, verified, created_at, notes 
-                                FROM wp_charterhub_users WHERE id = ?");
-            $stmt->bind_param("i", $customer_id);
-            $stmt->execute();
-            $result = $stmt->get_result();
-            
-            if ($result->num_rows === 0) {
-                $stmt->close();
-                error_log("Failed to retrieve created customer with ID: $customer_id");
-                json_response([
-                    'success' => false,
-                    'message' => 'Customer created but failed to retrieve customer details'
-                ], 500);
-            }
-            
-            $customer = $result->fetch_assoc();
-            $stmt->close();
-            
-            json_response([
-                'success' => true,
-                'message' => 'Customer created successfully',
-                'customer' => [
-                    'id' => (int)$customer['id'],
-                    'email' => $customer['email'],
-                    'username' => $customer['username'] ?? '',
-                    'firstName' => $customer['first_name'] ?? '',
-                    'lastName' => $customer['last_name'] ?? '',
-                    'phone' => $customer['phone_number'] ?? '',
-                    'company' => $customer['company'] ?? '',
-                    'country' => $customer['country'] ?? '',
-                    'address' => $customer['address'] ?? '',
-                    'notes' => $customer['notes'] ?? '',
-                    'role' => $customer['role'],
-                    'verified' => (bool)$customer['verified'],
-                    'createdAt' => $customer['created_at'],
-                    'selfRegistered' => false
-                ]
-            ]);
-        } catch (Exception $e) {
-            error_log("Exception during customer creation: " . $e->getMessage());
-            json_response([
-                'success' => false,
-                'message' => 'Exception during customer creation: ' . $e->getMessage()
-            ], 500);
-        }
+        ];
     }
 }
 
 /**
  * Handle DELETE request - Delete a customer
+ * 
+ * @return array Results of the operation
  */
 function handle_delete_request() {
-    // Get customer ID from query string
-    $customer_id = isset($_GET['id']) ? (int)$_GET['id'] : null;
+    // Get customer ID from request
+    $customer_id = null;
     
-    if (!$customer_id) {
-        json_response([
-            'success' => false,
-            'message' => 'Customer ID is required'
-        ], 400);
+    // Check if ID is in URL parameters
+    if (isset($_GET['id'])) {
+        $customer_id = intval($_GET['id']);
+    } else {
+        // Check if ID is in JSON body
+        $input_raw = file_get_contents('php://input');
+        $input = json_decode($input_raw, true);
+        
+        if (isset($input['id'])) {
+            $customer_id = intval($input['id']);
+        }
     }
     
+    if (!$customer_id) {
+        return [
+            'success' => false,
+            'message' => 'Customer ID is required'
+        ];
+    }
+    
+    // Get database connection
     $conn = get_database_connection();
     
-    // Check if customer exists and is a client
+    // First check if customer exists and is a client
     $stmt = $conn->prepare("SELECT id FROM wp_charterhub_users WHERE id = ? AND role = 'client'");
     $stmt->bind_param("i", $customer_id);
     $stmt->execute();
@@ -625,32 +529,36 @@ function handle_delete_request() {
     
     if ($result->num_rows === 0) {
         $stmt->close();
-        json_response([
+        $conn->close();
+        
+        return [
             'success' => false,
-            'message' => 'Customer not found'
-        ], 404);
+            'message' => 'Customer not found or not a client'
+        ];
     }
     $stmt->close();
     
     // Delete customer
-    $stmt = $conn->prepare("DELETE FROM wp_charterhub_users WHERE id = ?");
+    $stmt = $conn->prepare("DELETE FROM wp_charterhub_users WHERE id = ? AND role = 'client'");
     $stmt->bind_param("i", $customer_id);
     $stmt->execute();
     
     if ($stmt->affected_rows === 0) {
         $stmt->close();
-        json_response([
+        $conn->close();
+        
+        return [
             'success' => false,
             'message' => 'Failed to delete customer'
-        ], 500);
+        ];
     }
     
     $stmt->close();
     $conn->close();
     
-    json_response([
-        'success' => true,
-        'message' => 'Customer deleted successfully'
-    ]);
+    return [
+        'message' => 'Customer deleted successfully',
+        'customer_id' => $customer_id
+    ];
 }
 ?> 
