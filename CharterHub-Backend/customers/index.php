@@ -61,6 +61,7 @@ if ($originIsAllowed || $isDev) {
     header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
     header("Access-Control-Allow-Headers: Authorization, Content-Type, X-CSRF-Token, X-Requested-With, Accept, Origin, Cache-Control, Pragma, Expires");
     header("Access-Control-Max-Age: 86400"); // 24 hours
+    error_log("CUSTOMERS: Setting CORS headers for origin: $origin");
 } else {
     error_log("CUSTOMERS: Disallowed origin: $origin");
 }
