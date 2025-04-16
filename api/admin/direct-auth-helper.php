@@ -68,7 +68,7 @@ function validateAdminAccess() {
         
         // Get admin info from database
         $db = getDbConnection();
-        $stmt = $db->prepare("SELECT id, email, username, role FROM users WHERE id = ? AND role = 'admin'");
+        $stmt = $db->prepare("SELECT id, email, username, role FROM wp_charterhub_users WHERE id = ? AND role = 'admin'");
         $stmt->execute([$payload['sub']]);
         $admin = $stmt->fetch(PDO::FETCH_ASSOC);
         
@@ -337,6 +337,8 @@ function handle_admin_request($callback) {
         // Log detailed request information
         log_admin_request_details();
         
+        error_log("DIRECT-AUTH: Starting admin request processing for " . $_SERVER['REQUEST_METHOD']);
+        
         // 2. Initialize response structure
         $response = [
             'success' => false,
@@ -344,24 +346,37 @@ function handle_admin_request($callback) {
             'data' => null
         ];
         
-        // 3. Perform authentication for non-OPTIONS requests
-        $admin_user = ensure_admin_access();
-        
-        // 4. Execute the endpoint-specific callback
-        $result = $callback($admin_user);
-        
-        // 5. Build success response
-        $response['success'] = true;
-        $response['data'] = $result;
+        try {
+            // 3. Perform authentication for non-OPTIONS requests
+            error_log("DIRECT-AUTH: Authenticating admin user");
+            $admin_user = ensure_admin_access();
+            error_log("DIRECT-AUTH: Admin authentication successful for user ID: " . ($admin_user['user_id'] ?? $admin_user['id'] ?? 'unknown'));
+            
+            // 4. Execute the endpoint-specific callback
+            error_log("DIRECT-AUTH: Executing endpoint callback");
+            $result = $callback($admin_user);
+            
+            // 5. Build success response
+            $response['success'] = true;
+            $response['data'] = $result;
+            error_log("DIRECT-AUTH: Request processed successfully");
+        } catch (Exception $auth_e) {
+            error_log("DIRECT-AUTH: Authentication or processing error: " . $auth_e->getMessage() . " - Code: " . $auth_e->getCode());
+            throw $auth_e;
+        }
         
     } catch (Exception $e) {
         // Log any exceptions
-        error_log("ADMIN API Exception: " . $e->getMessage());
+        error_log("ADMIN API Exception: " . $e->getMessage() . " - Code: " . $e->getCode() . " - File: " . $e->getFile() . " - Line: " . $e->getLine());
+        if ($e->getPrevious()) {
+            error_log("Caused by: " . $e->getPrevious()->getMessage());
+        }
         
         // Build error response
         $response['success'] = false;
         $response['message'] = $e->getMessage();
         $response['error'] = true;
+        $response['code'] = $e->getCode() ?: 500;
     } finally {
         // Clean up output buffer to the original level
         while (ob_get_level() > $initial_ob_level) {
@@ -369,6 +384,7 @@ function handle_admin_request($callback) {
         }
         
         // 6. Return JSON response
+        error_log("DIRECT-AUTH: Sending final response: " . ($response['success'] ? 'success' : 'error'));
         header('Content-Type: application/json');
         echo json_encode($response);
         exit;
