@@ -53,7 +53,7 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
     $env_origins_array = $env_origins ? explode(',', $env_origins) : [];
     
     // Default allowed origins
-    $default_origins = [
+    $allowed_origins = [
         'http://localhost:3000',
         'http://localhost:3001',
         'http://localhost:5173', 
@@ -64,15 +64,16 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
         'http://127.0.0.1:8080',
         'https://charterhub.yachtstory.com',
         'https://staging-charterhub.yachtstory.com',
-        'https://charter-p2f5lp7ws-maurits-s-projects.vercel.app',
-        'https://charter-hub.vercel.app',
-        'https://charter-hub-git-main-maurits-s-projects.vercel.app',
-        'https://charter-hub-vercel.app',
-        'https://charter-hub.vercel.app/'  // Added trailing slash version
+        'https://app.yachtstory.be',
+        'https://admin.yachtstory.be',
+        'https://www.admin.yachtstory.be',  // Added with www subdomain
+        'http://admin.yachtstory.be',       // Added HTTP version just in case
+        'https://yachtstory.be',            // Added root domain
+        'https://www.yachtstory.be'         // Added www version of root domain
     ];
 
     // Combine environment origins with default origins
-    $allowed_origins = array_merge($default_origins, $env_origins_array);
+    $allowed_origins = array_merge($allowed_origins, $env_origins_array);
     
     // Debug - Log all allowed origins
     error_log("CORS allowed origins: " . implode(', ', $allowed_origins));
@@ -103,6 +104,8 @@ function apply_cors_headers($allowed_methods = ['GET', 'POST', 'OPTIONS']) {
 
     // Enhanced logging for CORS diagnosis
     error_log("CORS check: Origin=$origin, isDev=$isDev, isAllowed=$isAllowed");
+    error_log("CORS request headers: " . json_encode(getallheaders()));
+    error_log("CORS request method: " . $_SERVER['REQUEST_METHOD']);
 
     // Set CORS headers based on origin
     if ($isAllowed || $isDev) {

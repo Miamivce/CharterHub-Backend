@@ -10,7 +10,7 @@
 
 // Enable CORS for local development
 if (!function_exists('apply_cors_headers')) {
-    function apply_cors_headers() {
+    function apply_cors_headers($allowed_methods = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']) {
         // Define allowed origins
         $allowed_origins = [
             'http://localhost:3000',
@@ -31,7 +31,7 @@ if (!function_exists('apply_cors_headers')) {
             header("Access-Control-Allow-Origin: $origin");
             header("Access-Control-Allow-Credentials: true");
             header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-HTTP-Method-Override");
-            header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+            header("Access-Control-Allow-Methods: " . implode(', ', $allowed_methods));
             header("Access-Control-Max-Age: 86400"); // 24 hours cache
             
             error_log("CORS headers applied for origin: $origin");
@@ -40,7 +40,7 @@ if (!function_exists('apply_cors_headers')) {
             header("Access-Control-Allow-Origin: http://localhost:3000");
             header("Access-Control-Allow-Credentials: true");
             header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, Pragma, X-HTTP-Method-Override");
-            header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+            header("Access-Control-Allow-Methods: " . implode(', ', $allowed_methods));
             header("Access-Control-Max-Age: 86400"); // 24 hours cache
             error_log("CORS headers applied with default localhost:3000 (no origin provided)");
         } else {
@@ -271,5 +271,63 @@ if (!function_exists('is_admin_user')) {
             return false;
         }
     }
+}
+
+/**
+ * Handle admin API request with proper CORS handling
+ * 
+ * This function provides standardized handling for admin API endpoints:
+ * 1. Applies CORS headers before any authentication
+ * 2. Handles preflight OPTIONS requests immediately
+ * 3. Only performs authentication for non-OPTIONS requests
+ * 4. Provides consistent error handling and response format
+ * 
+ * @param callable $callback Function that contains the endpoint-specific logic
+ * @return void
+ */
+function handle_admin_request($callback) {
+    // 1. Apply global CORS headers immediately with explicit support for all admin methods
+    apply_cors_headers(['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']);
+    
+    // 2. Handle preflight requests before authentication
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        // Additional debugging for OPTIONS requests
+        error_log("Admin API: Handling OPTIONS preflight for " . ($_SERVER['HTTP_ORIGIN'] ?? 'unknown origin'));
+        error_log("Admin API: Request headers: " . json_encode(getallheaders()));
+        http_response_code(200);
+        exit;
+    }
+    
+    // 3. Initialize response structure
+    $response = [
+        'success' => false,
+        'message' => '',
+        'data' => null
+    ];
+    
+    try {
+        // 4. Perform authentication only for non-OPTIONS requests
+        $admin_user = ensure_admin_access();
+        
+        // 5. Execute endpoint-specific callback
+        $result = $callback($admin_user);
+        
+        // 6. Set success response
+        $response['success'] = true;
+        $response['data'] = $result;
+        
+    } catch (Exception $e) {
+        // Handle exceptions
+        $response['message'] = $e->getMessage();
+        $response['error'] = true;
+        
+        // Log the error
+        error_log("Admin API exception: " . $e->getMessage());
+    }
+    
+    // 7. Return JSON response
+    header('Content-Type: application/json');
+    echo json_encode($response);
+    exit;
 }
 ?> 
