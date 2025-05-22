@@ -107,7 +107,7 @@ function handleGetCustomers() {
     
     if ($customerId) {
         // Fetch a specific customer
-        $stmt = $db->prepare("SELECT * FROM wp_charterhub_customers WHERE id = ?");
+        $stmt = $db->prepare("SELECT * FROM wp_charterhub_users WHERE id = ? AND role = 'customer'");
         $stmt->bind_param("i", $customerId);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -132,7 +132,7 @@ function handleGetCustomers() {
         $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 20;
         $offset = ($page - 1) * $limit;
         
-        $stmt = $db->prepare("SELECT * FROM wp_charterhub_customers ORDER BY created_at DESC LIMIT ?, ?");
+        $stmt = $db->prepare("SELECT * FROM wp_charterhub_users WHERE role = 'customer' ORDER BY created_at DESC LIMIT ?, ?");
         $stmt->bind_param("ii", $offset, $limit);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -143,7 +143,7 @@ function handleGetCustomers() {
         }
         
         // Get total count for pagination
-        $countResult = $db->query("SELECT COUNT(*) as total FROM wp_charterhub_customers");
+        $countResult = $db->query("SELECT COUNT(*) as total FROM wp_charterhub_users WHERE role = 'customer'");
         $countRow = $countResult->fetch_assoc();
         $totalCount = $countRow['total'];
         
@@ -190,22 +190,28 @@ function handlePostCustomer() {
     if ($customerId) {
         // Update existing customer
         $stmt = $db->prepare(
-            "UPDATE wp_charterhub_customers SET 
-                name = ?, 
+            "UPDATE wp_charterhub_users SET 
+                first_name = ?, 
+                last_name = ?, 
                 email = ?, 
                 phone = ?, 
+                company = ?,
                 address = ?, 
-                city = ?, 
+                country = ?, 
+                notes = ?,
                 updated_at = NOW()
-            WHERE id = ?"
+            WHERE id = ? AND role = 'customer'"
         );
         
-        $stmt->bind_param("sssssi", 
-            $input['name'], 
+        $stmt->bind_param("ssssssssi", 
+            $input['firstName'], 
+            $input['lastName'],
             $input['email'], 
-            $input['phone'], 
-            $input['address'], 
-            $input['city'], 
+            $input['phone'],
+            $input['company'],
+            $input['address'],
+            $input['country'],
+            $input['notes'],
             $customerId
         );
         
@@ -218,18 +224,41 @@ function handlePostCustomer() {
         ];
     } else {
         // Create new customer
+        // Generate username and password if not provided
+        if (!isset($input['username']) || empty($input['username'])) {
+            $input['username'] = strtolower($input['firstName'] . $input['lastName'] . '_' . rand(10000, 99999));
+        }
+        
+        if (!isset($input['password']) || empty($input['password'])) {
+            $input['password'] = generate_random_password();
+        }
+        
+        // Hash password
+        $hashed_password = password_hash($input['password'], PASSWORD_DEFAULT);
+        
+        // Set role to customer
+        $role = 'customer';
+        $created_by = 'admin'; // Mark as admin created
+        
         $stmt = $db->prepare(
-            "INSERT INTO wp_charterhub_customers 
-                (name, email, phone, address, city, created_at, updated_at) 
-             VALUES (?, ?, ?, ?, ?, NOW(), NOW())"
+            "INSERT INTO wp_charterhub_users 
+                (username, password, email, first_name, last_name, phone, company, address, country, notes, role, created_by, created_at, updated_at) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())"
         );
         
-        $stmt->bind_param("sssss", 
-            $input['name'], 
-            $input['email'], 
-            $input['phone'], 
-            $input['address'], 
-            $input['city']
+        $stmt->bind_param("ssssssssssss", 
+            $input['username'],
+            $hashed_password,
+            $input['email'],
+            $input['firstName'],
+            $input['lastName'],
+            $input['phone'],
+            $input['company'],
+            $input['address'],
+            $input['country'],
+            $input['notes'],
+            $role,
+            $created_by
         );
         
         $result = $stmt->execute();
@@ -238,7 +267,11 @@ function handlePostCustomer() {
         return [
             'success' => $result,
             'message' => $result ? "Customer created successfully" : "Failed to create customer",
-            'data' => $result ? ['id' => $newId] : null
+            'data' => $result ? [
+                'id' => $newId,
+                'username' => $input['username'],
+                'password' => $input['password'] // Return plain password for notifying customer
+            ] : null
         ];
     }
 }
@@ -250,7 +283,7 @@ function handleDeleteCustomer() {
     // Get database connection
     $db = get_database_connection();
     
-    // Check if a specific customer ID is provided
+    // Get customer ID from URL parameter
     $customerId = isset($_GET['id']) ? (int)$_GET['id'] : null;
     
     if (!$customerId) {
@@ -262,14 +295,52 @@ function handleDeleteCustomer() {
     }
     
     // Delete the customer
-    $stmt = $db->prepare("DELETE FROM wp_charterhub_customers WHERE id = ?");
+    $stmt = $db->prepare("DELETE FROM wp_charterhub_users WHERE id = ? AND role = 'customer'");
     $stmt->bind_param("i", $customerId);
     $result = $stmt->execute();
     
     return [
-        'success' => $result,
-        'message' => $result ? "Customer deleted successfully" : "Failed to delete customer",
+        'success' => $result && $stmt->affected_rows > 0,
+        'message' => $result && $stmt->affected_rows > 0 ? "Customer deleted successfully" : "Customer not found or could not be deleted",
         'data' => null
     ];
+}
+
+/**
+ * Sanitize input data
+ */
+function sanitize_input($data) {
+    if (is_array($data)) {
+        foreach ($data as $key => $value) {
+            $data[$key] = is_array($value) ? sanitize_input($value) : sanitize_value($value);
+        }
+    }
+    return $data;
+}
+
+/**
+ * Sanitize a single value
+ */
+function sanitize_value($value) {
+    if (is_string($value)) {
+        $value = trim($value);
+        $value = stripslashes($value);
+        $value = htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+    }
+    return $value;
+}
+
+/**
+ * Generate a random password
+ */
+function generate_random_password($length = 12) {
+    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()';
+    $password = '';
+    
+    for ($i = 0; $i < $length; $i++) {
+        $password .= $chars[rand(0, strlen($chars) - 1)];
+    }
+    
+    return $password;
 }
 ?> 
