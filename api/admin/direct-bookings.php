@@ -126,38 +126,87 @@ try {
 function handle_get_request() {
     $conn = get_database_connection();
     
+    // First, check the table structure to determine available columns
+    try {
+        $describeQuery = "DESCRIBE wp_charterhub_bookings";
+        $describeStmt = $conn->prepare($describeQuery);
+        $describeStmt->execute();
+        $describeResult = $describeStmt->get_result();
+        
+        $availableColumns = [];
+        while ($col = $describeResult->fetch_assoc()) {
+            $availableColumns[] = $col['Field'];
+        }
+        $describeStmt->close();
+        
+        error_log("Available booking columns: " . implode(", ", $availableColumns));
+        
+        // Check for specific columns
+        $hasAdminId = in_array('created_by_admin_id', $availableColumns);
+        $hasMainCharterer = in_array('main_charterer_id', $availableColumns);
+        $hasCustomerId = in_array('customer_id', $availableColumns);
+        
+        // Determine which column to use for customer relationship
+        $customerColumn = $hasMainCharterer ? 'main_charterer_id' : ($hasCustomerId ? 'customer_id' : null);
+        
+    } catch (Exception $e) {
+        error_log("Error checking table structure: " . $e->getMessage());
+        // Default to most common structure
+        $hasAdminId = false;  
+        $customerColumn = 'main_charterer_id';
+    }
+    
     // Check if a customer ID was provided to filter bookings
     $customer_id = isset($_GET['customer_id']) ? intval($_GET['customer_id']) : null;
     
-    // Base query to get all bookings - removed yacht join since table doesn't exist
+    // Base query to get all bookings - with dynamic columns based on table structure
     $query = "SELECT 
                 b.id,
                 b.yacht_id,
                 b.start_date,
                 b.end_date,
                 b.status,
-                b.total_price,
+                b.total_price,";
+                
+    // Add admin fields conditionally            
+    if ($hasAdminId) {
+        $query .= "
                 b.created_by_admin_id,
                 admin.first_name as admin_first_name,
                 admin.last_name as admin_last_name,
-                admin.email as admin_email,
-                b.main_charterer_id,
+                admin.email as admin_email,";
+    } else {
+        $query .= "
+                NULL as created_by_admin_id,
+                NULL as admin_first_name,
+                NULL as admin_last_name,
+                NULL as admin_email,";
+    }
+    
+    // Continue with main charterer fields
+    $query .= "
+                b.{$customerColumn} as main_charterer_id,
                 u_main.first_name as main_charterer_first_name,
                 u_main.last_name as main_charterer_last_name,
                 u_main.email as main_charterer_email,
                 b.created_at
               FROM wp_charterhub_bookings b
-              LEFT JOIN wp_charterhub_users u_main ON b.main_charterer_id = u_main.id
-              LEFT JOIN wp_charterhub_users admin ON b.created_by_admin_id = admin.id
-              WHERE 1=1";
+              LEFT JOIN wp_charterhub_users u_main ON b.{$customerColumn} = u_main.id";
+              
+    // Add admin join conditionally
+    if ($hasAdminId) {
+        $query .= " LEFT JOIN wp_charterhub_users admin ON b.created_by_admin_id = admin.id";
+    }
+    
+    $query .= " WHERE 1=1";
     
     // Add customer filter if specified
     $params = [];
     $types = "";
     
-    if ($customer_id) {
+    if ($customer_id && $customerColumn) {
         // Get bookings where this customer is the main charterer or a guest
-        $query .= " AND (b.main_charterer_id = ? OR 
+        $query .= " AND (b.{$customerColumn} = ? OR 
                          b.id IN (SELECT booking_id FROM wp_charterhub_booking_guests WHERE user_id = ?))";
         $params[] = $customer_id;
         $params[] = $customer_id;
@@ -316,7 +365,7 @@ function handle_post_request() {
             $check_stmt->close();
         }
         
-        // Get the table structure to determine correct columns
+        // Check what columns exist in the bookings table
         try {
             $describe_query = "DESCRIBE wp_charterhub_bookings";
             $describe_stmt = $conn->prepare($describe_query);
@@ -331,27 +380,55 @@ function handle_post_request() {
             
             error_log("Booking table columns: " . implode(", ", $columns));
             
-            // Check if main_charterer_id or customer_id is used
-            $charterer_column = in_array('main_charterer_id', $columns) ? 'main_charterer_id' : 'customer_id';
+            // Check key columns
+            $hasAdminId = in_array('created_by_admin_id', $columns);
+            $hasMainCharterer = in_array('main_charterer_id', $columns);
+            $hasCustomerId = in_array('customer_id', $columns);
             
-            // Insert booking record using the correct column name
-            $insert_booking_query = "INSERT INTO wp_charterhub_bookings 
-                                    (yacht_id, start_date, end_date, status, total_price, created_by_admin_id, $charterer_column, created_at, updated_at) 
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+            // Determine which column name to use
+            $charterer_column = $hasMainCharterer ? 'main_charterer_id' : ($hasCustomerId ? 'customer_id' : null);
+            
+            if ($charterer_column === null) {
+                throw new Exception("No customer column found in bookings table");
+            }
+            
+            // Build the insert query based on available columns
+            $fields = ['yacht_id', 'start_date', 'end_date', 'status', 'total_price', $charterer_column, 'created_at', 'updated_at'];
+            $placeholders = ['?', '?', '?', '?', '?', '?', 'NOW()', 'NOW()'];
+            $types = "isssdi"; // yacht_id, start_date, end_date, status, total_price, charterer_id
+            $values = [$yacht_id, $start_date, $end_date, $status, $total_price, $main_charterer_id];
+            
+            // Add admin ID if the column exists
+            if ($hasAdminId) {
+                $fields[] = 'created_by_admin_id';
+                $placeholders[] = '?';
+                $types .= 'i';
+                $values[] = $admin_id;
+            }
+            
+            // Create the final SQL query
+            $insert_booking_query = "INSERT INTO wp_charterhub_bookings (" . 
+                                   implode(", ", $fields) . 
+                                   ") VALUES (" . 
+                                   implode(", ", $placeholders) . 
+                                   ")";
+                                   
         } catch (Exception $e) {
-            // If describe fails, try to use the most common column name
+            // If describe fails, use a safe fallback query
             error_log("Error describing table: " . $e->getMessage());
-            $charterer_column = 'main_charterer_id'; // Default to this column
             
-            // Insert booking record with our best guess at the column name
+            // Safe fallback - try with main_charterer_id but not admin ID
+            $charterer_column = 'main_charterer_id';
             $insert_booking_query = "INSERT INTO wp_charterhub_bookings 
-                                    (yacht_id, start_date, end_date, status, total_price, created_by_admin_id, $charterer_column, created_at, updated_at) 
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                                    (yacht_id, start_date, end_date, status, total_price, main_charterer_id, created_at, updated_at) 
+                                    VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
+            $types = "isssdi"; // yacht_id, start_date, end_date, status, total_price, charterer_id
+            $values = [$yacht_id, $start_date, $end_date, $status, $total_price, $main_charterer_id];
         }
         
         // Prepare and execute the insert
         $stmt = $conn->prepare($insert_booking_query);
-        $stmt->bind_param("isssiii", $yacht_id, $start_date, $end_date, $status, $total_price, $admin_id, $main_charterer_id);
+        $stmt->bind_param($types, ...$values);
         
         if (!$stmt->execute()) {
             throw new Exception("Failed to create booking: " . $stmt->error . " (Query: $insert_booking_query)");
@@ -460,24 +537,18 @@ function handle_post_request() {
         // Commit transaction
         $conn->commit();
         
-        // Get full booking details for response
+        // Format response - adapt to match what was saved in the database
         $booking_details = [
             'id' => $booking_id,
             'yacht' => [
                 'id' => $yacht_id,
-                // Add yacht name if needed
+                'name' => "Yacht #" . $yacht_id // Placeholder value
             ],
             'startDate' => $start_date,
             'endDate' => $end_date,
             'status' => $status,
             'totalPrice' => $total_price,
-            'created_by_admin_id' => $admin_id,
-            'created_by_admin' => $admin_info['email'],
-            'admin' => [
-                'id' => $admin_id,
-                'name' => $admin_info['email'], // Using email as name since we don't have full name in admin_info
-                'email' => $admin_info['email']
-            ],
+            'createdAt' => date('Y-m-d H:i:s'),
             'mainCharterer' => [
                 'id' => $main_charterer_id,
                 'firstName' => $main_charterer['firstName'] ?? '',
@@ -487,10 +558,21 @@ function handle_post_request() {
             'guestList' => []
         ];
         
+        // Add admin info if the column exists
+        if (isset($hasAdminId) && $hasAdminId) {
+            $booking_details['created_by_admin_id'] = $admin_id;
+            $booking_details['created_by_admin'] = $admin_info['email']; 
+            $booking_details['admin'] = [
+                'id' => $admin_id,
+                'name' => $admin_info['email'],
+                'email' => $admin_info['email']
+            ];
+        }
+        
         // Add guests to response
         if (!empty($guest_ids)) {
             // Query for guest details
-            $guest_details_query = "SELECT id, display_name, email FROM wp_charterhub_users WHERE id IN (" . implode(',', array_fill(0, count($guest_ids), '?')) . ")";
+            $guest_details_query = "SELECT id, first_name, last_name, email FROM wp_charterhub_users WHERE id IN (" . implode(',', array_fill(0, count($guest_ids), '?')) . ")";
             $guest_details_stmt = $conn->prepare($guest_details_query);
             
             // Bind all guest IDs
@@ -500,15 +582,10 @@ function handle_post_request() {
             $guest_details_result = $guest_details_stmt->get_result();
             
             while ($guest_row = $guest_details_result->fetch_assoc()) {
-                // Split display_name into first and last name
-                $name_parts = explode(' ', $guest_row['display_name'], 2);
-                $first_name = $name_parts[0];
-                $last_name = isset($name_parts[1]) ? $name_parts[1] : '';
-                
                 $booking_details['guestList'][] = [
                     'id' => (int)$guest_row['id'],
-                    'firstName' => $first_name,
-                    'lastName' => $last_name,
+                    'firstName' => $guest_row['first_name'],
+                    'lastName' => $guest_row['last_name'],
                     'email' => $guest_row['email']
                 ];
             }
@@ -524,7 +601,7 @@ function handle_post_request() {
         ]);
         
     } catch (Exception $e) {
-        // Rollback transaction on error - avoid using ping() which is deprecated
+        // Rollback transaction on error
         if (isset($conn)) {
             try {
                 $conn->rollback();
@@ -584,6 +661,40 @@ function handle_put_request() {
         }
         $check_stmt->close();
         
+        // Check what columns exist in the bookings table
+        try {
+            $describe_query = "DESCRIBE wp_charterhub_bookings";
+            $describe_stmt = $conn->prepare($describe_query);
+            $describe_stmt->execute();
+            $result = $describe_stmt->get_result();
+            
+            $columns = [];
+            while ($row = $result->fetch_assoc()) {
+                $columns[] = $row['Field'];
+            }
+            $describe_stmt->close();
+            
+            error_log("Booking table columns: " . implode(", ", $columns));
+            
+            // Check key columns
+            $hasAdminId = in_array('created_by_admin_id', $columns);
+            $hasMainCharterer = in_array('main_charterer_id', $columns);
+            $hasCustomerId = in_array('customer_id', $columns);
+            
+            // Determine which column name to use for the charterer
+            $charterer_column = $hasMainCharterer ? 'main_charterer_id' : ($hasCustomerId ? 'customer_id' : null);
+            
+            if ($charterer_column === null) {
+                throw new Exception("No customer column found in bookings table");
+            }
+            
+        } catch (Exception $e) {
+            error_log("Error checking table structure: " . $e->getMessage());
+            // Default to most common structure
+            $hasAdminId = false;
+            $charterer_column = 'main_charterer_id';
+        }
+        
         // Begin transaction
         $conn->begin_transaction();
         
@@ -639,10 +750,10 @@ function handle_put_request() {
             $update_types .= "s";
         }
         
-        // Handle main charterer
-        if (isset($data['mainCharterer']) && isset($data['mainCharterer']['id'])) {
+        // Handle main charterer - only if the column exists
+        if (isset($data['mainCharterer']) && isset($data['mainCharterer']['id']) && $charterer_column) {
             $main_charterer_id = intval($data['mainCharterer']['id']);
-            $update_fields[] = "main_charterer_id = ?";
+            $update_fields[] = "$charterer_column = ?";
             $update_params[] = $main_charterer_id;
             $update_types .= "i";
             
@@ -711,7 +822,7 @@ function handle_put_request() {
         // Commit transaction
         $conn->commit();
         
-        // Fetch the updated booking
+        // Construct the query using the columns we know exist
         $select_query = "SELECT 
                             b.id,
                             b.yacht_id,
@@ -719,20 +830,39 @@ function handle_put_request() {
                             b.end_date,
                             b.status,
                             b.total_price,
-                            b.special_requests,
+                            b.special_requests,";
+                            
+        // Add admin fields if they exist                    
+        if ($hasAdminId) {
+            $select_query .= "
                             b.created_by_admin_id,
                             admin.first_name as admin_first_name,
                             admin.last_name as admin_last_name,
-                            admin.email as admin_email,
-                            b.main_charterer_id,
+                            admin.email as admin_email,";
+        } else {
+            $select_query .= "
+                            NULL as created_by_admin_id,
+                            NULL as admin_first_name,
+                            NULL as admin_last_name,
+                            NULL as admin_email,";
+        }
+        
+        // Add charterer fields
+        $select_query .= "
+                            b.$charterer_column as main_charterer_id,
                             u_main.first_name as main_charterer_first_name,
                             u_main.last_name as main_charterer_last_name,
                             u_main.email as main_charterer_email,
                             b.created_at
                           FROM wp_charterhub_bookings b
-                          LEFT JOIN wp_charterhub_users u_main ON b.main_charterer_id = u_main.id
-                          LEFT JOIN wp_charterhub_users admin ON b.created_by_admin_id = admin.id
-                          WHERE b.id = ?";
+                          LEFT JOIN wp_charterhub_users u_main ON b.$charterer_column = u_main.id";
+        
+        // Add admin join if needed
+        if ($hasAdminId) {
+            $select_query .= " LEFT JOIN wp_charterhub_users admin ON b.created_by_admin_id = admin.id";
+        }
+        
+        $select_query .= " WHERE b.id = ?";
         
         $select_stmt = $conn->prepare($select_query);
         $select_stmt->bind_param("i", $id);
@@ -782,13 +912,6 @@ function handle_put_request() {
             'totalPrice' => (float)$row['total_price'],
             'specialRequests' => $row['special_requests'] ?? '',
             'createdAt' => $row['created_at'],
-            'created_by_admin_id' => $row['created_by_admin_id'] ? (int)$row['created_by_admin_id'] : null,
-            'created_by_admin' => $row['created_by_admin_id'] ? ($row['admin_first_name'] . ' ' . $row['admin_last_name']) : 'Administrator',
-            'admin' => $row['created_by_admin_id'] ? [
-                'id' => (int)$row['created_by_admin_id'],
-                'name' => $row['admin_first_name'] . ' ' . $row['admin_last_name'],
-                'email' => $row['admin_email']
-            ] : null,
             'yacht' => [
                 'id' => (int)$row['yacht_id'],
                 'name' => "Yacht #" . $row['yacht_id']  // Use placeholder since we don't have yacht table
@@ -801,6 +924,17 @@ function handle_put_request() {
             ],
             'guestList' => $guests
         ];
+        
+        // Add admin info only if the column exists
+        if ($hasAdminId && $row['created_by_admin_id']) {
+            $booking['created_by_admin_id'] = (int)$row['created_by_admin_id'];
+            $booking['created_by_admin'] = $row['admin_first_name'] . ' ' . $row['admin_last_name'];
+            $booking['admin'] = [
+                'id' => (int)$row['created_by_admin_id'],
+                'name' => $row['admin_first_name'] . ' ' . $row['admin_last_name'],
+                'email' => $row['admin_email']
+            ];
+        }
         
         $conn->close();
         
