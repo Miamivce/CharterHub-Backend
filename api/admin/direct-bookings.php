@@ -129,11 +129,10 @@ function handle_get_request() {
     // Check if a customer ID was provided to filter bookings
     $customer_id = isset($_GET['customer_id']) ? intval($_GET['customer_id']) : null;
     
-    // Base query to get all bookings
+    // Base query to get all bookings - removed yacht join since table doesn't exist
     $query = "SELECT 
                 b.id,
                 b.yacht_id,
-                y.name as yacht_name,
                 b.start_date,
                 b.end_date,
                 b.status,
@@ -148,7 +147,6 @@ function handle_get_request() {
                 u_main.email as main_charterer_email,
                 b.created_at
               FROM wp_charterhub_bookings b
-              LEFT JOIN wp_charterhub_yachts y ON b.yacht_id = y.id
               LEFT JOIN wp_charterhub_users u_main ON b.main_charterer_id = u_main.id
               LEFT JOIN wp_charterhub_users admin ON b.created_by_admin_id = admin.id
               WHERE 1=1";
@@ -219,7 +217,7 @@ function handle_get_request() {
         }
         $guests_stmt->close();
         
-        // Format the booking with all related data
+        // Format the booking with all related data - use a placeholder for yacht name
         $bookings[] = [
             'id' => (int)$row['id'],
             'startDate' => $row['start_date'],
@@ -236,7 +234,7 @@ function handle_get_request() {
             ] : null,
             'yacht' => [
                 'id' => (int)$row['yacht_id'],
-                'name' => $row['yacht_name']
+                'name' => "Yacht #" . $row['yacht_id']  // Use placeholder since we don't have yacht table
             ],
             'mainCharterer' => [
                 'id' => (int)$row['main_charterer_id'],
@@ -717,7 +715,6 @@ function handle_put_request() {
         $select_query = "SELECT 
                             b.id,
                             b.yacht_id,
-                            y.name as yacht_name,
                             b.start_date,
                             b.end_date,
                             b.status,
@@ -733,7 +730,6 @@ function handle_put_request() {
                             u_main.email as main_charterer_email,
                             b.created_at
                           FROM wp_charterhub_bookings b
-                          LEFT JOIN wp_charterhub_yachts y ON b.yacht_id = y.id
                           LEFT JOIN wp_charterhub_users u_main ON b.main_charterer_id = u_main.id
                           LEFT JOIN wp_charterhub_users admin ON b.created_by_admin_id = admin.id
                           WHERE b.id = ?";
@@ -795,7 +791,7 @@ function handle_put_request() {
             ] : null,
             'yacht' => [
                 'id' => (int)$row['yacht_id'],
-                'name' => $row['yacht_name']
+                'name' => "Yacht #" . $row['yacht_id']  // Use placeholder since we don't have yacht table
             ],
             'mainCharterer' => [
                 'id' => (int)$row['main_charterer_id'],

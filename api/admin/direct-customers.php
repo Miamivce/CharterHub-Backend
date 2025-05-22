@@ -139,7 +139,24 @@ function handleGetCustomers() {
         $customers = [];
         
         while ($row = $result->fetch_assoc()) {
-            $customers[] = $row;
+            // Format the data to match frontend expectations
+            $customers[] = [
+                'id' => (int)$row['id'],
+                'email' => $row['email'],
+                'username' => $row['username'] ?? '',
+                'firstName' => $row['first_name'] ?? '',
+                'lastName' => $row['last_name'] ?? '',
+                'phone' => $row['phone'] ?? '',
+                'company' => $row['company'] ?? '',
+                'country' => $row['country'] ?? '',
+                'address' => $row['address'] ?? '',
+                'notes' => $row['notes'] ?? '',
+                'role' => $row['role'],
+                'verified' => (bool)($row['verified'] ?? false),
+                'createdAt' => $row['created_at'],
+                'createdBy' => $row['created_by'] ?? 'admin',
+                'bookings' => 0 // Default value since we don't join with bookings table
+            ];
         }
         
         // Get total count for pagination
@@ -147,17 +164,16 @@ function handleGetCustomers() {
         $countRow = $countResult->fetch_assoc();
         $totalCount = $countRow['total'];
         
+        // Format the response in the structure expected by the frontend
         return [
             'success' => true,
             'message' => "Customers retrieved successfully",
-            'data' => [
-                'customers' => $customers,
-                'pagination' => [
-                    'total' => $totalCount,
-                    'page' => $page,
-                    'limit' => $limit,
-                    'pages' => ceil($totalCount / $limit)
-                ]
+            'customers' => $customers,
+            'meta' => [
+                'total' => $totalCount,
+                'page' => $page,
+                'limit' => $limit,
+                'pages' => ceil($totalCount / $limit)
             ]
         ];
     }
