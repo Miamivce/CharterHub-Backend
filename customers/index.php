@@ -56,6 +56,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
+// Make sure Authorization header is passed through
+if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+    error_log("CUSTOMERS/INDEX.PHP - Found Authorization header, passing through");
+} else if (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+    // In some server configurations, Apache prefixes with REDIRECT_
+    $_SERVER['HTTP_AUTHORIZATION'] = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    error_log("CUSTOMERS/INDEX.PHP - Using REDIRECT_HTTP_AUTHORIZATION header");
+} else {
+    error_log("CUSTOMERS/INDEX.PHP - No Authorization header found, this might cause 401 errors");
+}
+
 // Log the redirection for debugging
 error_log("Redirecting customer request from /customers/index.php to /api/admin/direct-customers.php");
 

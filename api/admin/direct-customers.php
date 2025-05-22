@@ -200,36 +200,119 @@ function handlePostCustomer() {
     // Sanitize input
     $input = sanitize_input($input);
     
+    // First, check the table structure to determine available columns
+    try {
+        $describeQuery = "DESCRIBE wp_charterhub_users";
+        $describeStmt = $db->prepare($describeQuery);
+        $describeStmt->execute();
+        $describeResult = $describeStmt->get_result();
+        
+        $availableColumns = [];
+        while ($col = $describeResult->fetch_assoc()) {
+            $availableColumns[] = $col['Field'];
+        }
+        $describeStmt->close();
+        
+        error_log("Available users columns: " . implode(", ", $availableColumns));
+        
+        // Check for specific columns
+        $hasUsername = in_array('username', $availableColumns);
+        $hasFirstName = in_array('first_name', $availableColumns);
+        $hasLastName = in_array('last_name', $availableColumns);
+        $hasCompany = in_array('company', $availableColumns);
+        $hasAddress = in_array('address', $availableColumns);
+        $hasCountry = in_array('country', $availableColumns);
+        $hasPhone = in_array('phone', $availableColumns);
+        $hasPhoneNumber = in_array('phone_number', $availableColumns);
+        $hasDisplayName = in_array('display_name', $availableColumns);
+        $hasVerified = in_array('verified', $availableColumns);
+        
+        // Determine which column to use for phone
+        $phoneColumn = $hasPhone ? 'phone' : ($hasPhoneNumber ? 'phone_number' : null);
+        
+    } catch (Exception $e) {
+        error_log("Error checking table structure: " . $e->getMessage());
+        // Default to most common structure
+        $hasUsername = false;
+        $hasFirstName = true;
+        $hasLastName = true;
+        $hasCompany = true;
+        $hasAddress = true; 
+        $hasCountry = true;
+        $phoneColumn = 'phone';
+        $hasDisplayName = true;
+        $hasVerified = true;
+    }
+    
     // Check if updating existing customer
     $customerId = isset($input['id']) ? (int)$input['id'] : null;
     
     if ($customerId) {
-        // Update existing customer
-        $stmt = $db->prepare(
-            "UPDATE wp_charterhub_users SET 
-                first_name = ?, 
-                last_name = ?, 
-                email = ?, 
-                phone = ?, 
-                company = ?,
-                address = ?, 
-                country = ?, 
-                notes = ?,
-                updated_at = NOW()
-            WHERE id = ? AND role = 'customer'"
-        );
+        // Build dynamic update field list based on available columns
+        $updateFields = [];
+        $updateParams = [];
+        $paramTypes = "";
         
-        $stmt->bind_param("ssssssssi", 
-            $input['firstName'], 
-            $input['lastName'],
-            $input['email'], 
-            $input['phone'],
-            $input['company'],
-            $input['address'],
-            $input['country'],
-            $input['notes'],
-            $customerId
-        );
+        if ($hasFirstName) {
+            $updateFields[] = "first_name = ?";
+            $updateParams[] = $input['firstName'];
+            $paramTypes .= "s";
+        }
+        
+        if ($hasLastName) {
+            $updateFields[] = "last_name = ?";
+            $updateParams[] = $input['lastName'];
+            $paramTypes .= "s";
+        }
+        
+        // Always include email
+        $updateFields[] = "email = ?";
+        $updateParams[] = $input['email'];
+        $paramTypes .= "s";
+        
+        if ($phoneColumn) {
+            $updateFields[] = "$phoneColumn = ?";
+            $updateParams[] = $input['phone'];
+            $paramTypes .= "s";
+        }
+        
+        if ($hasCompany) {
+            $updateFields[] = "company = ?";
+            $updateParams[] = $input['company'];
+            $paramTypes .= "s";
+        }
+        
+        if ($hasAddress) {
+            $updateFields[] = "address = ?";
+            $updateParams[] = $input['address'];
+            $paramTypes .= "s";
+        }
+        
+        if ($hasCountry) {
+            $updateFields[] = "country = ?";
+            $updateParams[] = $input['country'];
+            $paramTypes .= "s";
+        }
+        
+        // Notes should be in most schemas
+        $updateFields[] = "notes = ?";
+        $updateParams[] = $input['notes'];
+        $paramTypes .= "s";
+        
+        // Add updated_at timestamp
+        $updateFields[] = "updated_at = NOW()";
+        
+        // Add customer ID for WHERE clause
+        $updateParams[] = $customerId;
+        $paramTypes .= "i";
+        
+        // Build final query
+        $updateQuery = "UPDATE wp_charterhub_users SET " . 
+                       implode(", ", $updateFields) . 
+                       " WHERE id = ? AND role = 'customer'";
+        
+        $stmt = $db->prepare($updateQuery);
+        $stmt->bind_param($paramTypes, ...$updateParams);
         
         $result = $stmt->execute();
         
@@ -238,54 +321,136 @@ function handlePostCustomer() {
             'message' => $result ? "Customer updated successfully" : "Failed to update customer",
             'data' => $result ? ['id' => $customerId] : null
         ];
+        
     } else {
-        // Create new customer
-        // Generate username and password if not provided
-        if (!isset($input['username']) || empty($input['username'])) {
-            $input['username'] = strtolower($input['firstName'] . $input['lastName'] . '_' . rand(10000, 99999));
+        // Create new customer - build insertion fields dynamically
+        $insertFields = ['email', 'role', 'created_at', 'updated_at'];
+        $insertPlaceholders = ['?', '?', 'NOW()', 'NOW()'];
+        $insertParams = [$input['email'], 'customer'];
+        $paramTypes = "ss";
+        
+        // Add username if column exists
+        if ($hasUsername) {
+            // Generate username if not provided
+            if (!isset($input['username']) || empty($input['username'])) {
+                $input['username'] = strtolower($input['firstName'] . $input['lastName'] . '_' . rand(10000, 99999));
+            }
+            $insertFields[] = 'username';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['username'];
+            $paramTypes .= "s";
         }
         
+        // Always add password
+        // Generate password if not provided
         if (!isset($input['password']) || empty($input['password'])) {
             $input['password'] = generate_random_password();
         }
         
         // Hash password
         $hashed_password = password_hash($input['password'], PASSWORD_DEFAULT);
+        $insertFields[] = 'password';
+        $insertPlaceholders[] = '?';
+        $insertParams[] = $hashed_password;
+        $paramTypes .= "s";
         
-        // Set role to customer
-        $role = 'customer';
-        $created_by = 'admin'; // Mark as admin created
+        // Add name fields if they exist
+        if ($hasFirstName) {
+            $insertFields[] = 'first_name';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['firstName'];
+            $paramTypes .= "s";
+        }
         
-        $stmt = $db->prepare(
-            "INSERT INTO wp_charterhub_users 
-                (username, password, email, first_name, last_name, phone, company, address, country, notes, role, created_by, created_at, updated_at) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())"
-        );
+        if ($hasLastName) {
+            $insertFields[] = 'last_name';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['lastName'];
+            $paramTypes .= "s";
+        }
         
-        $stmt->bind_param("ssssssssssss", 
-            $input['username'],
-            $hashed_password,
-            $input['email'],
-            $input['firstName'],
-            $input['lastName'],
-            $input['phone'],
-            $input['company'],
-            $input['address'],
-            $input['country'],
-            $input['notes'],
-            $role,
-            $created_by
-        );
+        if ($hasDisplayName) {
+            $insertFields[] = 'display_name';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['firstName'] . ' ' . $input['lastName'];
+            $paramTypes .= "s";
+        }
+        
+        // Add phone if the column exists
+        if ($phoneColumn) {
+            $insertFields[] = $phoneColumn;
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['phone'];
+            $paramTypes .= "s";
+        }
+        
+        // Add company if the column exists
+        if ($hasCompany) {
+            $insertFields[] = 'company';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['company'];
+            $paramTypes .= "s";
+        }
+        
+        // Add address if the column exists
+        if ($hasAddress) {
+            $insertFields[] = 'address';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['address'];
+            $paramTypes .= "s";
+        }
+        
+        // Add country if the column exists
+        if ($hasCountry) {
+            $insertFields[] = 'country';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = $input['country'];
+            $paramTypes .= "s";
+        }
+        
+        // Add notes
+        $insertFields[] = 'notes';
+        $insertPlaceholders[] = '?';
+        $insertParams[] = $input['notes'];
+        $paramTypes .= "s";
+        
+        // Add created_by
+        $insertFields[] = 'created_by';
+        $insertPlaceholders[] = '?';
+        $insertParams[] = 'admin';
+        $paramTypes .= "s";
+        
+        // Add verified status if column exists
+        if ($hasVerified) {
+            $insertFields[] = 'verified';
+            $insertPlaceholders[] = '?';
+            $insertParams[] = 1; // Set as verified since admin is creating
+            $paramTypes .= "i";
+        }
+        
+        // Build final insert query
+        $insertQuery = "INSERT INTO wp_charterhub_users (" . 
+                       implode(", ", $insertFields) . 
+                       ") VALUES (" . 
+                       implode(", ", $insertPlaceholders) . 
+                       ")";
+        
+        error_log("Insert Query: " . $insertQuery);
+        error_log("Param Types: " . $paramTypes);
+        
+        // Prepare and execute the query
+        $stmt = $db->prepare($insertQuery);
+        $stmt->bind_param($paramTypes, ...$insertParams);
         
         $result = $stmt->execute();
         $newId = $db->insert_id;
         
         return [
             'success' => $result,
-            'message' => $result ? "Customer created successfully" : "Failed to create customer",
+            'message' => $result ? "Customer created successfully" : "Failed to create customer: " . $db->error,
             'data' => $result ? [
                 'id' => $newId,
-                'username' => $input['username'],
+                'username' => isset($input['username']) ? $input['username'] : null,
                 'password' => $input['password'] // Return plain password for notifying customer
             ] : null
         ];

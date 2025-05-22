@@ -1,9 +1,9 @@
 <?php
 /**
- * Customer Save API Redirect
+ * Customer Save API Endpoint Redirect
  * 
- * This file redirects customer save requests to the direct-customers.php API endpoint
- * This fixes the issue where the older customer save endpoint path is still being used
+ * This file redirects customer creation/update requests to the direct-customers.php API endpoint
+ * It fixes the issue where the older customer endpoint path is still being used
  */
 
 // Define allowed origins for CORS
@@ -49,18 +49,43 @@ if (in_array($origin, $allowed_origins)) {
     error_log("CUSTOMERS/SAVE.PHP - Origin not allowed: $origin");
 }
 
-// Handle preflight OPTIONS requests immediately 
+// Handle preflight OPTIONS requests immediately
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     error_log("CUSTOMERS/SAVE.PHP - Handling OPTIONS preflight request directly");
     http_response_code(200);
     exit;
 }
 
-// Log the redirection for debugging
-error_log("Redirecting customer save request from /customers/save.php to /api/admin/direct-customers.php");
+// Make sure Authorization header is passed through
+if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+    error_log("CUSTOMERS/SAVE.PHP - Found Authorization header, passing through");
+} else if (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+    // In some server configurations, Apache prefixes with REDIRECT_
+    $_SERVER['HTTP_AUTHORIZATION'] = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    error_log("CUSTOMERS/SAVE.PHP - Using REDIRECT_HTTP_AUTHORIZATION header");
+} else {
+    error_log("CUSTOMERS/SAVE.PHP - No Authorization header found, this might cause 401 errors");
+}
 
-// Set method to POST to ensure it goes to the create/update handler
-$_SERVER['REQUEST_METHOD'] = 'POST';
+// If this is a POST request, we might need to transform the data
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Get JSON input
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if ($input) {
+        // Handle legacy format conversion
+        if (isset($input['update_only'])) {
+            error_log("CUSTOMERS/SAVE.PHP - Legacy format detected, transforming data");
+            // Remove update_only flag as direct-customers.php doesn't use it
+            unset($input['update_only']);
+            
+            // Prepare to forward the modified input
+            $_POST['transformed_input'] = json_encode($input);
+        }
+    }
+}
+
+error_log("Redirecting customer save request from /customers/save.php to /api/admin/direct-customers.php");
 
 // Include the direct-customers.php file with all its functionality
 require_once __DIR__ . '/../api/admin/direct-customers.php';
